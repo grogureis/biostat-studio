@@ -89,6 +89,34 @@ describe("parseReadiness", () => {
     await expect(firstStart).rejects.toThrow("Unable to start sidecar: spawn failed");
   });
 
+  it("restarts with a new session after an unexpected post-readiness exit", async () => {
+    const firstChild = new ControlledChild();
+    const secondChild = new ControlledChild();
+    const children = [firstChild, secondChild];
+    let spawnCount = 0;
+    const controller = createSidecarController({
+      spawn: () => children[spawnCount++]!,
+      resolveLaunch: () => ({ sidecarPath: "python", sidecarArgs: [] }),
+      createToken: () => `session-${spawnCount + 1}`,
+    });
+
+    const firstStart = controller.startSidecar();
+    firstChild.stdout.write('{"port":43117,"api":1}\n');
+    const firstSession = await firstStart;
+
+    firstChild.exit(1);
+    const secondStart = controller.startSidecar();
+    expect(spawnCount).toBe(2);
+    secondChild.stdout.write('{"port":43118,"api":1}\n');
+    const secondSession = await secondStart;
+
+    expect(secondSession).toEqual({
+      apiBase: "http://127.0.0.1:43118",
+      token: "session-2",
+    });
+    expect(secondSession).not.toEqual(firstSession);
+  });
+
   it("shares concurrent termination and redacts the session token from startup errors", async () => {
     const child = new ControlledChild();
     const observedEnvironments: Array<Record<string, string | undefined>> = [];

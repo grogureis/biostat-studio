@@ -207,6 +207,7 @@ export function createSidecarController(
 
       let stderr = "";
       let settled = false;
+      let session: SidecarSession | undefined;
       const readinessReader = createInterface({ input: child.stdout });
       const timeout = setTimeout(() => {
         void fail("Timed out waiting for sidecar readiness");
@@ -242,6 +243,9 @@ export function createSidecarController(
       child.once("exit", (code, signal) => {
         if (!settled) {
           void fail(`Sidecar exited before readiness (code ${code ?? "none"}, signal ${signal ?? "none"})`);
+        } else if (session && activeChild === child && activeSession === session) {
+          activeChild = undefined;
+          activeSession = undefined;
         }
       });
       readinessReader.once("line", (line) => {
@@ -249,11 +253,12 @@ export function createSidecarController(
           const readiness = parseReadiness(line);
           settled = true;
           finishStartup();
-          activeSession = {
+          session = {
             apiBase: `http://127.0.0.1:${readiness.port}`,
             token,
           };
-          resolveStart(activeSession);
+          activeSession = session;
+          resolveStart(session);
         } catch {
           void fail("Invalid sidecar readiness");
         }
