@@ -1,0 +1,15 @@
+{
+  "name": "biostat-studio",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test:python && npm run test:desktop",
+    "test:python": "services/analysis/.venv/bin/python -m pytest services/analysis/tests",
+    "test:desktop": "npm run test --workspace apps/desktop",
+    "dev": "npm run dev --workspace apps/desktop",
+    "package:mac": "npm run package:mac --workspace apps/desktop"
+  }
+}
