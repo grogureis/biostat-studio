@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 import pandas as pd
 from PIL import Image
 import pytest
@@ -162,10 +164,48 @@ def test_paired_group_figure_uses_the_executor_complete_pairs(tmp_path: Path) ->
     )
     result_bundle = run_plan(frame, plan)
 
-    artifact = build_figures(frame, plan, result_bundle, tmp_path, "en")[0]
+    english = build_figures(frame, plan, result_bundle, tmp_path / "en", "en")[0]
+    turkish = build_figures(frame, plan, result_bundle, tmp_path / "tr", "tr")[0]
 
-    assert "n = 2" in artifact.caption
-    assert "after" in artifact.alt_text
-    assert "before" in artifact.alt_text
-    assert "p1" not in artifact.alt_text
-    assert "p2" not in artifact.svg_path.read_text(encoding="utf-8")
+    assert "n = 2 pairs (4 observations)" in english.caption
+    assert "n = 2 pairs (4 observations)" in english.alt_text
+    assert "n = 2 çift (4 gözlem)" in turkish.caption
+    assert "n = 2 çift (4 gözlem)" in turkish.alt_text
+    assert "after" in english.alt_text
+    assert "before" in english.alt_text
+    assert "p1" not in english.alt_text
+    assert "p2" not in english.svg_path.read_text(encoding="utf-8")
+
+
+def test_same_figure_inputs_produce_byte_identical_svg_artifacts(
+    tmp_path: Path,
+    core_frame: pd.DataFrame,
+    approved_plan: AnalysisPlan,
+    bundle,
+) -> None:
+    """Variable SVG metadata or IDs would make reproducible artifacts differ."""
+    first = build_figures(core_frame, approved_plan, bundle, tmp_path / "first", "en")[0]
+    second = build_figures(core_frame, approved_plan, bundle, tmp_path / "second", "en")[0]
+
+    assert sha256(first.svg_path.read_bytes()).digest() == sha256(second.svg_path.read_bytes()).digest()
+
+
+def test_draw_failure_closes_the_exact_figure(
+    tmp_path: Path,
+    core_frame: pd.DataFrame,
+    approved_plan: AnalysisPlan,
+    bundle,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exception before save must not leave an invisible Matplotlib figure open."""
+    before = set(plt.get_fignums())
+
+    def fail_to_draw(self, *args, **kwargs):
+        raise RuntimeError("forced_draw_failure")
+
+    monkeypatch.setattr(Axes, "violinplot", fail_to_draw)
+
+    with pytest.raises(RuntimeError, match="forced_draw_failure"):
+        build_figures(core_frame, approved_plan, bundle, tmp_path, "en")
+
+    assert set(plt.get_fignums()) == before

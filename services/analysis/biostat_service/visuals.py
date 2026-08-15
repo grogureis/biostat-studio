@@ -36,6 +36,8 @@ SLATE = "#2f3b3d"
 MIST_GREEN = "#cfe3da"
 GROUP_METHODS = frozenset({"welch_t_test", "paired_t_test", "welch_anova"})
 _SAFE_STEM = re.compile(r"[^a-z0-9_-]+")
+SVG_CREATOR = "BioStat Studio"
+SVG_HASH_SALT = "biostat-studio-figure-v1"
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,15 @@ _TEXT = {
             "Group comparison figure showing individual complete-case observations "
             "and distributions of {outcome} across {groups} (n = {n})."
         ),
+        "paired_caption": (
+            "Distribution of {outcome} by {exposure}; points show individual "
+            "complete-pair observations (n = {pairs} pairs ({observations} observations))."
+        ),
+        "paired_alt": (
+            "Paired group comparison figure showing individual complete-pair observations "
+            "and distributions of {outcome} across {groups} "
+            "(n = {pairs} pairs ({observations} observations))."
+        ),
     },
     "tr": {
         "figure": "Şekil",
@@ -77,6 +88,16 @@ _TEXT = {
         "alt": (
             "Grup karşılaştırma grafiği, {outcome} değişkeninin {groups} gruplarındaki "
             "tam olgu bireysel gözlemlerini ve dağılımlarını gösterir (n = {n})."
+        ),
+        "paired_caption": (
+            "{outcome} değişkeninin {exposure} gruplarına göre dağılımı; noktalar "
+            "tam çift bireysel gözlemlerini gösterir "
+            "(n = {pairs} çift ({observations} gözlem))."
+        ),
+        "paired_alt": (
+            "Eşleştirilmiş grup karşılaştırma grafiği, {outcome} değişkeninin {groups} "
+            "gruplarındaki tam çift bireysel gözlemlerini ve dağılımlarını gösterir "
+            "(n = {pairs} çift ({observations} gözlem))."
         ),
     },
 }
@@ -131,8 +152,14 @@ def save_figure(fig: Figure, stem: Path, *, output_root: Path) -> tuple[Path, Pa
     png = _safe_destination(output_root, stem.with_suffix(".png"))
     svg = _safe_destination(output_root, stem.with_suffix(".svg"))
     try:
-        fig.savefig(png, dpi=DPI, bbox_inches="tight", facecolor=WARM_WHITE)
-        fig.savefig(svg, bbox_inches="tight", facecolor=WARM_WHITE)
+        with matplotlib.rc_context({"svg.hashsalt": SVG_HASH_SALT}):
+            fig.savefig(png, dpi=DPI, bbox_inches="tight", facecolor=WARM_WHITE)
+            fig.savefig(
+                svg,
+                bbox_inches="tight",
+                facecolor=WARM_WHITE,
+                metadata={"Date": None, "Creator": SVG_CREATOR},
+            )
     finally:
         plt.close(fig)
     return png, svg
@@ -191,6 +218,7 @@ def _draw_group_distribution(
         for level in levels
     ]
     colors = [DEEP_GREEN, TERRACOTTA]
+    fig: Figure | None = None
     with matplotlib.rc_context(
         {
             "axes.edgecolor": SLATE,
@@ -205,76 +233,81 @@ def _draw_group_distribution(
             "ytick.color": SLATE,
         }
     ):
-        fig, axis = plt.subplots(
-            figsize=(JOURNAL_COLUMN_WIDTH_INCHES, JOURNAL_COLUMN_HEIGHT_INCHES),
-            constrained_layout=True,
-            facecolor=WARM_WHITE,
-        )
-        axis.set_facecolor(WARM_WHITE)
-        positions = np.arange(1, len(groups) + 1, dtype=float)
-        violin = axis.violinplot(
-            groups,
-            positions=positions,
-            widths=0.72,
-            showmeans=False,
-            showmedians=False,
-            showextrema=False,
-        )
-        for index, body in enumerate(violin["bodies"]):
-            body.set_facecolor(colors[index % len(colors)])
-            body.set_edgecolor(colors[index % len(colors)])
-            body.set_alpha(0.25)
-
-        box = axis.boxplot(
-            groups,
-            positions=positions,
-            widths=0.25,
-            patch_artist=True,
-            showfliers=False,
-            medianprops={"color": WARM_WHITE, "linewidth": 1.5},
-            whiskerprops={"color": SLATE, "linewidth": 0.9},
-            capprops={"color": SLATE, "linewidth": 0.9},
-        )
-        for index, patch in enumerate(box["boxes"]):
-            patch.set_facecolor(colors[index % len(colors)])
-            patch.set_edgecolor(colors[index % len(colors)])
-            patch.set_alpha(0.9)
-
-        for index, values in enumerate(groups):
-            offsets = np.linspace(-0.15, 0.15, num=len(values), endpoint=True)
-            axis.scatter(
-                positions[index] + offsets,
-                values,
-                color=colors[index % len(colors)],
-                edgecolors=WARM_WHITE,
-                linewidths=0.55,
-                s=32,
-                alpha=0.95,
-                zorder=3,
+        try:
+            fig, axis = plt.subplots(
+                figsize=(JOURNAL_COLUMN_WIDTH_INCHES, JOURNAL_COLUMN_HEIGHT_INCHES),
+                constrained_layout=True,
+                facecolor=WARM_WHITE,
             )
+            axis.set_facecolor(WARM_WHITE)
+            positions = np.arange(1, len(groups) + 1, dtype=float)
+            violin = axis.violinplot(
+                groups,
+                positions=positions,
+                widths=0.72,
+                showmeans=False,
+                showmedians=False,
+                showextrema=False,
+            )
+            for index, body in enumerate(violin["bodies"]):
+                body.set_facecolor(colors[index % len(colors)])
+                body.set_edgecolor(colors[index % len(colors)])
+                body.set_alpha(0.25)
 
-        if pair_id is not None:
-            for pair in sorted(complete[pair_id].unique().tolist(), key=_sort_key):
-                paired_values = [
-                    complete.loc[
-                        (complete[pair_id] == pair) & (complete[exposure] == level), outcome
-                    ].iloc[0]
-                    for level in levels
-                ]
-                axis.plot(
-                    positions,
-                    paired_values,
-                    color=SLATE,
-                    linewidth=0.8,
-                    alpha=0.5,
-                    zorder=2,
+            box = axis.boxplot(
+                groups,
+                positions=positions,
+                widths=0.25,
+                patch_artist=True,
+                showfliers=False,
+                medianprops={"color": WARM_WHITE, "linewidth": 1.5},
+                whiskerprops={"color": SLATE, "linewidth": 0.9},
+                capprops={"color": SLATE, "linewidth": 0.9},
+            )
+            for index, patch in enumerate(box["boxes"]):
+                patch.set_facecolor(colors[index % len(colors)])
+                patch.set_edgecolor(colors[index % len(colors)])
+                patch.set_alpha(0.9)
+
+            for index, values in enumerate(groups):
+                offsets = np.linspace(-0.15, 0.15, num=len(values), endpoint=True)
+                axis.scatter(
+                    positions[index] + offsets,
+                    values,
+                    color=colors[index % len(colors)],
+                    edgecolors=WARM_WHITE,
+                    linewidths=0.55,
+                    s=32,
+                    alpha=0.95,
+                    zorder=3,
                 )
 
-        axis.set_xticks(positions, [str(level) for level in levels])
-        axis.set_xlabel(labels["group_axis"])
-        axis.set_ylabel(f"{_display_label(outcome)} ({labels['observed_value']})")
-        axis.grid(axis="y", color=MIST_GREEN, linewidth=0.7, alpha=0.85)
-        axis.set_axisbelow(True)
+            if pair_id is not None:
+                for pair in sorted(complete[pair_id].unique().tolist(), key=_sort_key):
+                    paired_values = [
+                        complete.loc[
+                            (complete[pair_id] == pair) & (complete[exposure] == level), outcome
+                        ].iloc[0]
+                        for level in levels
+                    ]
+                    axis.plot(
+                        positions,
+                        paired_values,
+                        color=SLATE,
+                        linewidth=0.8,
+                        alpha=0.5,
+                        zorder=2,
+                    )
+
+            axis.set_xticks(positions, [str(level) for level in levels])
+            axis.set_xlabel(labels["group_axis"])
+            axis.set_ylabel(f"{_display_label(outcome)} ({labels['observed_value']})")
+            axis.grid(axis="y", color=MIST_GREEN, linewidth=0.7, alpha=0.85)
+            axis.set_axisbelow(True)
+        except Exception:
+            if fig is not None:
+                plt.close(fig)
+            raise
     return fig
 
 
@@ -312,17 +345,20 @@ def build_figures(
         outcome_label = _display_label(outcome)
         exposure_label = _display_label(exposure)
         group_labels = ", ".join(str(level) for level in levels)
-        caption = (
-            f"{labels['figure']} {figure_number}. "
-            + labels["caption"].format(
-                outcome=outcome_label,
-                exposure=exposure_label,
-                n=result.n,
-            )
+        caption_template = labels["paired_caption"] if pair_id is not None else labels["caption"]
+        alt_template = labels["paired_alt"] if pair_id is not None else labels["alt"]
+        caption = f"{labels['figure']} {figure_number}. " + caption_template.format(
+            outcome=outcome_label,
+            exposure=exposure_label,
+            pairs=result.n,
+            observations=len(complete),
+            n=result.n,
         )
-        alt_text = labels["alt"].format(
+        alt_text = alt_template.format(
             outcome=outcome_label,
             groups=group_labels,
+            pairs=result.n,
+            observations=len(complete),
             n=result.n,
         )
         figure = _draw_group_distribution(
