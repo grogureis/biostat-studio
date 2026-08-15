@@ -49,6 +49,7 @@ class DataWarning:
 class DataProfile:
     """A source fingerprint and deterministic structural description of one sheet."""
 
+    source_path: Path
     source_sha256: str
     sheets: tuple[str, ...]
     selected_sheet: str
@@ -218,6 +219,7 @@ def profile_excel(path: Path, sheet: str | None = None) -> DataProfile:
         raise RuntimeError("source_file_changed")
 
     return DataProfile(
+        source_path=source.resolve(),
         source_sha256=before,
         sheets=sheets,
         selected_sheet=selected,
