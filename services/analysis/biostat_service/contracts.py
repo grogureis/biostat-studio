@@ -55,6 +55,15 @@ class EffectSize(BaseModel):
     value: Optional[float] = None
 
 
+class AnalysisProvenance(BaseModel):
+    data_fingerprint: str = Field(min_length=1)
+    plan_version: int = Field(ge=1)
+    exclusions: list[str]
+    transformations: list[str]
+    random_seed: Optional[int]
+    library_versions: dict[str, str] = Field(min_length=1)
+
+
 class AnalysisResult(BaseModel):
     id: str = Field(min_length=1)
     method: str = Field(min_length=1)
@@ -63,6 +72,7 @@ class AnalysisResult(BaseModel):
     p_value: Optional[float] = Field(default=None, ge=0, le=1)
     confidence_interval: ConfidenceInterval
     effect_size: EffectSize
+    provenance: AnalysisProvenance
     diagnostics: dict[str, Any] = Field(default_factory=dict)
     exclusions: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

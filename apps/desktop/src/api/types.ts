@@ -13,9 +13,9 @@ export interface StudyBrief {
   hypothesis: string;
   design: StudyDesign;
   outcome_variables: string[];
-  exposure_variables: string[];
-  covariates: string[];
-  language: Language;
+  exposure_variables?: string[];
+  covariates?: string[];
+  language?: Language;
 }
 
 export interface VariableRole {
@@ -57,6 +57,15 @@ export interface EffectSize {
   value: number | null;
 }
 
+export interface AnalysisProvenance {
+  data_fingerprint: string;
+  plan_version: number;
+  exclusions: string[];
+  transformations: string[];
+  random_seed: number | null;
+  library_versions: Record<string, string>;
+}
+
 export interface AnalysisResult {
   id: string;
   method: string;
@@ -65,6 +74,7 @@ export interface AnalysisResult {
   p_value: number | null;
   confidence_interval: ConfidenceInterval;
   effect_size: EffectSize;
+  provenance: AnalysisProvenance;
   diagnostics: Record<string, unknown>;
   exclusions: string[];
   warnings: string[];
