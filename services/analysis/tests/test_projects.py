@@ -10,7 +10,7 @@ from openpyxl import Workbook
 import pytest
 
 from biostat_service.contracts import StudyBrief
-from biostat_service.data_intake import profile_excel
+from biostat_service.data_intake import DataProfile, VariableMetadata, profile_excel
 from biostat_service.projects import append_audit_event, create_project
 
 
@@ -150,3 +150,157 @@ def test_audit_events_are_appended_without_rewriting_prior_events(
         "data_imported",
         "data_structure_approved",
     ]
+
+
+def test_orphaned_audit_log_is_preserved_and_rejected_for_recovery(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Reinitializing an orphaned audit log would irreversibly lose prior decisions."""
+    source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", "age"])
+    root = tmp_path / "cardio.biostat"
+    root.mkdir()
+    audit_path = root / "audit.jsonl"
+    original_audit = b'{"type":"data_imported","actor":"user"}\n'
+    audit_path.write_bytes(original_audit)
+
+    with pytest.raises(ValueError, match="orphaned_audit_log"):
+        create_project(root, brief, profile_excel(source))
+
+    assert audit_path.read_bytes() == original_audit
+    assert not (root / "project.json").exists()
+
+
+def test_audit_event_rejects_unknown_or_nested_patient_payloads(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Permitting arbitrary event fields would let patient values enter the audit trail."""
+    source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", "age"])
+    project = create_project(tmp_path / "cardio.biostat", brief, profile_excel(source))
+
+    with pytest.raises(ValueError, match="unknown_audit_event_fields"):
+        append_audit_event(
+            project,
+            {
+                "type": "data_imported",
+                "actor": "user",
+                "row_values": ["patient-001"],
+            },
+        )
+    with pytest.raises(TypeError, match="invalid_audit_method_ids"):
+        append_audit_event(
+            project,
+            {
+                "type": "analysis_completed",
+                "actor": "system",
+                "method_ids": ["welch_t_test", {"patient": "patient-001"}],
+            },
+        )
+    with pytest.raises(TypeError, match="invalid_audit_plan_version"):
+        append_audit_event(
+            project,
+            {"type": "plan_approved", "actor": "user", "plan_version": None},
+        )
+
+    assert project.audit_path.read_text(encoding="utf-8") == ""
+
+
+def test_audit_event_accepts_only_typed_safe_provenance_fields(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Analysis provenance must remain auditable without carrying row-level data."""
+    source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", "age"])
+    profile = profile_excel(source)
+    project = create_project(tmp_path / "cardio.biostat", brief, profile)
+
+    append_audit_event(
+        project,
+        {
+            "type": "analysis_completed",
+            "actor": "system",
+            "plan_version": 2,
+            "data_fingerprint": profile.source_sha256,
+            "status": "completed",
+            "method_ids": ["welch_t_test", "mann_whitney_u"],
+        },
+    )
+
+    event = json.loads(project.audit_path.read_text(encoding="utf-8"))
+    assert event["plan_version"] == 2
+    assert event["data_fingerprint"] == profile.source_sha256
+    assert event["method_ids"] == ["welch_t_test", "mann_whitney_u"]
+    assert event["recorded_at"].endswith("+00:00")
+
+
+def test_project_rejects_symlinked_artifact_root_without_touching_outside_directory(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Following a project-owned symlink would write generated files outside the project."""
+    source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", "age"])
+    root = tmp_path / "cardio.biostat"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    sentinel = outside / "keep.txt"
+    sentinel.write_text("preserve", encoding="utf-8")
+    (root / "artifacts").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="unsafe_artifact_path"):
+        create_project(root, brief, profile_excel(source))
+
+    assert (root / "artifacts").is_symlink()
+    assert [path.name for path in outside.iterdir()] == ["keep.txt"]
+    assert not (root / "project.json").exists()
+
+
+def test_reopen_rejects_symlinked_audit_path_without_touching_outside_file(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Returning a project with a symlinked audit log would defer an unsafe write."""
+    source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", "age"])
+    profile = profile_excel(source)
+    root = tmp_path / "cardio.biostat"
+    project = create_project(root, brief, profile)
+    outside_audit = tmp_path / "outside-audit.jsonl"
+    outside_audit.write_text('{"keep":"outside"}\n', encoding="utf-8")
+    project.audit_path.unlink()
+    project.audit_path.symlink_to(outside_audit)
+
+    with pytest.raises(ValueError, match="unsafe_audit_path"):
+        create_project(root, brief, profile)
+
+    assert outside_audit.read_text(encoding="utf-8") == '{"keep":"outside"}\n'
+
+
+def test_project_manifest_encodes_tuple_source_labels_without_losing_type(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Treating tuple labels as arrays would lose a valid typed source identifier."""
+    profile = DataProfile(
+        source_path=tmp_path / "source.xlsx",
+        source_sha256="a" * 64,
+        sheets=("Analysis",),
+        selected_sheet="Analysis",
+        rows=2,
+        columns=1,
+        missing_cells=0,
+        variables={
+            "tuple:visit-2": VariableMetadata(
+                source_label=("visit", 2),
+                original_name="('visit', 2)",
+                display_name="Visit 2",
+                kind="continuous",
+                non_missing=2,
+                missing=0,
+                unique_values=2,
+            )
+        },
+        warnings=(),
+    )
+
+    project = create_project(tmp_path / "cardio.biostat", brief, profile)
+
+    manifest = json.loads(project.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["data_profile"]["variables"]["tuple:visit-2"]["source_label"] == {
+        "type": "tuple",
+        "items": ["visit", 2],
+    }
