@@ -1,4 +1,5 @@
 import type { AnalysisApi } from "../../api/client";
+import { useState } from "react";
 
 interface DataIntakeProps {
   api: AnalysisApi;
@@ -17,6 +18,7 @@ const labels = {
     selected: "Selected workbook",
     approve: "Approve data structure",
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
+    pickerFailure: "The workbook picker could not be opened. Try again.",
   },
   tr: {
     eyebrow: "02 / Veri kökeni",
@@ -27,6 +29,7 @@ const labels = {
     selected: "Seçilen çalışma kitabı",
     approve: "Veri yapısını onayla",
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
+    pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
   },
 } as const;
 
@@ -36,7 +39,16 @@ function basename(path: string): string {
 
 export function DataIntake({ api, dataFile, language, onFile }: DataIntakeProps) {
   const copy = labels[language];
-  const chooseFile = async () => onFile(await api.selectDataFile());
+  const [pickerFailed, setPickerFailed] = useState(false);
+  const chooseFile = async () => {
+    try {
+      const path = await api.selectDataFile();
+      setPickerFailed(false);
+      onFile(path);
+    } catch {
+      setPickerFailed(true);
+    }
+  };
 
   return (
     <section className="task-card" aria-labelledby="data-title">
@@ -54,6 +66,7 @@ export function DataIntake({ api, dataFile, language, onFile }: DataIntakeProps)
         </div>
         <button type="button" className="primary-action" onClick={chooseFile}>{copy.import}</button>
       </div>
+      {pickerFailed ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{copy.pickerFailure}</p></div> : null}
       <div className="task-footer">
         <p className="microcopy">XLSX · XLS · CSV</p>
         <button type="button" className="secondary-action" disabled={!dataFile}>{copy.approve}</button>

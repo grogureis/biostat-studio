@@ -178,4 +178,92 @@ describe("Clinical Calm workflow", () => {
     fireEvent.keyDown(document.body, { key: "Tab" });
     expect(screen.getByRole("link", { name: "Skip to active task" })).toBeInTheDocument();
   });
+
+  it("retries plan generation rather than incorrectly running analysis after a planning failure", async () => {
+    const api = fakeApi({
+      createPlan: vi.fn().mockRejectedValueOnce(new Error("service unavailable")).mockResolvedValueOnce(plan),
+    });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Analysis plan could not be completed");
+    expect(api.runAnalysis).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Retry plan generation" }));
+    expect(api.createPlan).toHaveBeenCalledTimes(2);
+    expect(api.runAnalysis).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Run analysis" })).toBeDisabled();
+  });
+
+  it("presents result warnings with text and an icon, and includes them in the inspector", async () => {
+    const warnedResult = { ...result, warnings: ["One influential observation merits review."] };
+    const api = fakeApi({ runAnalysis: vi.fn().mockResolvedValue([warnedResult]) });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Run analysis" }));
+
+    const warning = await screen.findByRole("note", { name: "Warning requiring review" });
+    expect(warning).toHaveTextContent("This result includes a warning that should be reviewed before release.");
+    expect(warning).toHaveTextContent("One influential observation merits review.");
+    expect(warning.querySelector("[aria-hidden='true']")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Warnings to review" })).toBeInTheDocument();
+  });
+
+  it("keeps visible UI copy Turkish in the run, report, inspector, and error states", async () => {
+    const api = fakeApi({ createPlan: vi.fn().mockRejectedValueOnce(new Error("service unavailable")).mockResolvedValueOnce(plan) });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Interface language" }), "tr");
+    expect(screen.getByText("YÖNTEM NOTU")).toBeInTheDocument();
+    expect(screen.getByText("Yerel kullanım")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Analiz planı" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Analiz planı tamamlanamadı");
+    expect(screen.getByRole("button", { name: "Plan oluşturmayı yeniden dene" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Plan oluşturmayı yeniden dene" }));
+    await user.click(screen.getByRole("checkbox", { name: "Bu planı onayla" }));
+    await user.click(screen.getByRole("button", { name: "Analizi çalıştır" }));
+    await screen.findByRole("heading", { name: "Sonuçlar" });
+    await user.click(screen.getByRole("button", { name: "Word raporu" }));
+    expect(screen.getByText("Sonuçlar bölümü")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Word raporunu dışa aktar" })).toBeEnabled();
+  });
+
+  it("gates results and report export until validated results exist, then retries an export failure", async () => {
+    const api = fakeApi({
+      exportReport: vi.fn().mockRejectedValueOnce(new Error("write failed")).mockResolvedValueOnce("/Users/research/Results.docx"),
+    });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    expect(screen.getByRole("button", { name: "Results review" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Word report" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Run analysis" }));
+    await screen.findByRole("heading", { name: "Results" });
+    await user.click(screen.getByRole("button", { name: "Word report" }));
+    await user.click(screen.getByRole("button", { name: "Export Word report" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Word report could not be completed");
+    await user.click(screen.getByRole("button", { name: "Retry Word export" }));
+    expect(api.exportReport).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("status")).toHaveTextContent("Word report saved");
+  });
+
+  it("handles a file-picker exception without exposing a path or crashing", async () => {
+    const api = fakeApi({ selectDataFile: vi.fn().mockRejectedValue(new Error("picker unavailable")) });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+    await user.click(screen.getByRole("button", { name: "Import Excel" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The workbook picker could not be opened");
+    expect(screen.queryByText("picker unavailable")).not.toBeInTheDocument();
+  });
 });
