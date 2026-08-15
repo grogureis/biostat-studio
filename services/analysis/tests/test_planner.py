@@ -116,6 +116,7 @@ def brief(
     outcome: str = "age_years",
     exposures: list[str] | None = None,
     covariates: list[str] | None = None,
+    pair_id: str | None = None,
     question: str = "Does treatment differ in the confirmed outcome?",
     hypothesis: str = "The confirmed groups differ.",
 ) -> StudyBrief:
@@ -127,6 +128,7 @@ def brief(
         "outcome_variables": [outcome],
         "exposure_variables": ["treatment_group"] if exposures is None else exposures,
         "covariates": [] if covariates is None else covariates,
+        "pair_id_variable": pair_id,
         "language": "en",
     }
     if design in {"cross_sectional", "cohort", "case_control", "trial", "repeated"}:
@@ -257,6 +259,256 @@ def test_two_confirmed_continuous_variables_plan_correlation() -> None:
 
     assert plan.blocking_errors == []
     assert plan.items[-1].method == "pearson_or_spearman"
+
+
+def profile_with_continuous_exposure() -> DataProfile:
+    profile = core_profile()
+    profile.variables["baseline_score"] = metadata(
+        "baseline_score", "continuous", unique_values=12
+    )
+    return profile
+
+
+def roles_with_pair_id(
+    *, outcome: str = "age_years", outcome_kind: str = "continuous"
+) -> dict[str, VariableRole]:
+    selected = roles(outcome=outcome, outcome_kind=outcome_kind)
+    selected["participant_id"] = VariableRole(
+        name="participant_id",
+        role="pair_id",
+        kind="identifier-candidate",
+        confirmed=True,
+    )
+    return selected
+
+
+@pytest.mark.parametrize(
+    ("outcome", "outcome_kind", "covariates", "expected_error"),
+    [
+        ("age_years", "continuous", ["event_30d"], "unsupported_repeated_adjustment"),
+        ("event_30d", "binary", [], "unsupported_repeated_outcome"),
+    ],
+)
+def test_unverified_repeated_models_block_before_ordinary_regression(
+    outcome: str,
+    outcome_kind: str,
+    covariates: list[str],
+    expected_error: str,
+) -> None:
+    """Ordinary regression would ignore within-subject dependence."""
+    selected_roles = roles_with_pair_id(
+        outcome=outcome, outcome_kind=outcome_kind
+    )
+    for covariate in covariates:
+        selected_roles[covariate] = VariableRole(
+            name=covariate,
+            role="covariate",
+            kind=core_profile().variables[covariate].kind,
+            confirmed=True,
+        )
+
+    plan = build_plan(
+        brief(
+            design="repeated",
+            outcome=outcome,
+            covariates=covariates,
+            pair_id="participant_id",
+        ),
+        core_profile(),
+        selected_roles,
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == [expected_error]
+
+
+@pytest.mark.parametrize(
+    ("pair_id", "selected_roles", "expected_error"),
+    [
+        (None, roles(), "missing_pair_id_variable"),
+        ("missing_id", roles(), "unknown_pair_id_variable:missing_id"),
+        ("age_years", roles(), "invalid_pair_id_variable:age_years"),
+        ("treatment_group", roles(), "invalid_pair_id_variable:treatment_group"),
+        (
+            "participant_id",
+            {
+                **roles(),
+                "participant_id": VariableRole(
+                    name="participant_id",
+                    role="pair_id",
+                    kind="identifier-candidate",
+                    confirmed=False,
+                ),
+            },
+            "unconfirmed_pair_id_variable:participant_id",
+        ),
+    ],
+)
+def test_paired_plan_requires_distinct_confirmed_pair_identifier(
+    pair_id: str | None,
+    selected_roles: dict[str, VariableRole],
+    expected_error: str,
+) -> None:
+    """A paired method is unexecutable without confirmed subject linkage."""
+    plan = build_plan(
+        brief(design="repeated", pair_id=pair_id),
+        core_profile(),
+        selected_roles,
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == [expected_error]
+
+
+def test_simple_paired_plan_includes_pair_identifier_and_structure_check() -> None:
+    """Dropping the pair identifier or two-condition check would unpair execution."""
+    plan = build_plan(
+        brief(design="repeated", pair_id="participant_id"),
+        core_profile(),
+        roles_with_pair_id(),
+    )
+
+    assert plan.blocking_errors == []
+    assert [item.method for item in plan.items] == [
+        "descriptive_summary",
+        "paired_t_test",
+    ]
+    assert all("participant_id" in item.required_variables for item in plan.items)
+    assert any(
+        "exactly two observations, one per confirmed condition, for each pair"
+        in assumption
+        for assumption in plan.items[-1].assumptions
+    )
+
+
+def test_paired_plan_rejects_multiple_confirmed_pair_identifiers() -> None:
+    """Ambiguous subject linkage must not select one identifier by dictionary order."""
+    profile = core_profile()
+    profile.variables["household_id"] = metadata(
+        "household_id", "identifier-candidate", unique_values=12
+    )
+    selected_roles = roles_with_pair_id()
+    selected_roles["household_id"] = VariableRole(
+        name="household_id",
+        role="pair_id",
+        kind="identifier-candidate",
+        confirmed=True,
+    )
+
+    plan = build_plan(
+        brief(design="repeated", pair_id="participant_id"),
+        profile,
+        selected_roles,
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == ["multiple_pair_id_variables"]
+
+
+def test_paired_plan_requires_exactly_two_confirmed_condition_levels() -> None:
+    """A one-level condition cannot produce within-pair differences."""
+    profile = core_profile()
+    profile.variables["treatment_group"] = metadata(
+        "treatment_group", "binary", unique_values=1
+    )
+
+    plan = build_plan(
+        brief(design="repeated", pair_id="participant_id"),
+        profile,
+        roles_with_pair_id(),
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == ["unsupported_repeated_design"]
+
+
+def test_repeated_subject_identifier_may_have_categorical_profile_kind() -> None:
+    """Repeated subject IDs naturally need not infer as unique identifier candidates."""
+    profile = core_profile()
+    profile.variables["participant_id"] = metadata(
+        "participant_id", "categorical", unique_values=6
+    )
+    selected_roles = roles()
+    selected_roles["participant_id"] = VariableRole(
+        name="participant_id",
+        role="pair_id",
+        kind="categorical",
+        confirmed=True,
+    )
+
+    plan = build_plan(
+        brief(design="repeated", pair_id="participant_id"),
+        profile,
+        selected_roles,
+    )
+
+    assert plan.blocking_errors == []
+    assert plan.items[-1].method == "paired_t_test"
+
+
+def test_unadjusted_logistic_regression_is_not_labeled_adjusted() -> None:
+    """Calling a one-predictor model adjusted misstates its estimand and effect."""
+    profile = profile_with_continuous_exposure()
+    selected_roles = roles(outcome="event_30d", outcome_kind="binary")
+    selected_roles["baseline_score"] = VariableRole(
+        name="baseline_score",
+        role="exposure",
+        kind="continuous",
+        confirmed=True,
+    )
+    plan = build_plan(
+        brief(
+            outcome="event_30d",
+            exposures=["baseline_score"],
+            covariates=[],
+        ),
+        profile,
+        selected_roles,
+    )
+
+    item = plan.items[-1]
+    assert item.method == "logistic_regression"
+    assert "Unadjusted association" in item.estimand
+    assert "unadjusted" in item.rationale
+    assert "effect_size:unadjusted_odds_ratio" in item.outputs
+    assert "adjusted" not in " ".join([item.estimand, item.rationale]).lower().replace(
+        "unadjusted", ""
+    )
+
+
+def test_regression_with_covariates_retains_adjusted_contract() -> None:
+    """Removing adjustment labeling would misstate a covariate-adjusted model."""
+    plan = build_plan(
+        brief(covariates=["event_30d"]),
+        core_profile(),
+        roles(),
+    )
+
+    item = plan.items[-1]
+    assert item.method == "linear_regression"
+    assert "Adjusted association" in item.estimand
+    assert "effect_size:adjusted_regression_coefficient" in item.outputs
+
+
+def test_multiple_exposures_fail_closed_without_multiplicity_contract() -> None:
+    """An unspecified primary contrast must not be labeled as a single analysis."""
+    profile = profile_with_continuous_exposure()
+    selected_roles = roles()
+    selected_roles["baseline_score"] = VariableRole(
+        name="baseline_score",
+        role="exposure",
+        kind="continuous",
+        confirmed=True,
+    )
+
+    plan = build_plan(
+        brief(exposures=["treatment_group", "baseline_score"]),
+        profile,
+        selected_roles,
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == ["multiple_exposures_unsupported"]
 
 
 def test_confirmed_continuous_outcome_without_predictors_gets_descriptive_plan() -> None:

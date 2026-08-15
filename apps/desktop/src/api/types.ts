@@ -15,6 +15,7 @@ export interface StudyBrief {
   outcome_variables: string[];
   exposure_variables?: string[];
   covariates?: string[];
+  pair_id_variable?: string;
   language?: Language;
 }
 

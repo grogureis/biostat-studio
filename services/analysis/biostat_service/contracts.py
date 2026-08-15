@@ -13,6 +13,7 @@ class StudyBrief(BaseModel):
     outcome_variables: list[str] = Field(min_length=1)
     exposure_variables: list[str] = Field(default_factory=list)
     covariates: list[str] = Field(default_factory=list)
+    pair_id_variable: Optional[str] = Field(default=None, min_length=1)
     language: Literal["en", "tr"] = "en"
 
 

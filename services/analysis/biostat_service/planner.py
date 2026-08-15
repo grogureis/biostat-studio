@@ -67,6 +67,38 @@ def _validate_role(
     return selected.kind, None
 
 
+def _validate_pair_id(
+    brief: StudyBrief,
+    profile: DataProfile,
+    roles: dict[str, VariableRole],
+) -> str | None:
+    pair_id = brief.pair_id_variable
+    if pair_id is None:
+        return "missing_pair_id_variable"
+    if pair_id in brief.outcome_variables or pair_id in brief.exposure_variables:
+        return f"invalid_pair_id_variable:{pair_id}"
+
+    metadata = profile.variables.get(pair_id)
+    if metadata is None:
+        return f"unknown_pair_id_variable:{pair_id}"
+    selected = roles.get(pair_id)
+    if selected is None or not selected.confirmed:
+        return f"unconfirmed_pair_id_variable:{pair_id}"
+    if selected.name != pair_id or selected.role not in {"pair_id", "subject_id"}:
+        return f"invalid_pair_id_role:{pair_id}"
+    if selected.kind != metadata.kind or selected.kind in {"date", "empty"}:
+        return f"invalid_pair_id_kind:{pair_id}"
+
+    confirmed_pair_ids = [
+        role.name
+        for role in roles.values()
+        if role.confirmed and role.role in {"pair_id", "subject_id"}
+    ]
+    if confirmed_pair_ids != [pair_id]:
+        return "multiple_pair_id_variables"
+    return None
+
+
 def _descriptive_item(
     variables: list[str], warnings: list[str]
 ) -> PlanItem:
@@ -98,7 +130,9 @@ def _descriptive_item(
     )
 
 
-def _method_contract(choice: PlanChoice) -> dict[str, object]:
+def _method_contract(
+    choice: PlanChoice, *, adjusted: bool
+) -> dict[str, object]:
     contracts: dict[str, dict[str, object]] = {
         "welch_t_test": {
             "estimand": "Difference in outcome means between the two independent groups.",
@@ -122,6 +156,7 @@ def _method_contract(choice: PlanChoice) -> dict[str, object]:
             ),
             "assumptions": [
                 "Pairs are correctly linked and independent of other pairs.",
+                "Confirm exactly two observations, one per confirmed condition, for each pair.",
                 "Check missing pairs, difference scale, distribution shape, and influential outliers.",
                 "Use the robust alternative only when distribution, outliers, scale, and estimand support it; a normality p-value alone is insufficient.",
             ],
@@ -174,32 +209,50 @@ def _method_contract(choice: PlanChoice) -> dict[str, object]:
             "figure": "association_scatter",
         },
         "linear_regression": {
-            "estimand": "Adjusted association with the confirmed continuous outcome.",
+            "estimand": (
+                f"{'Adjusted' if adjusted else 'Unadjusted'} association with the "
+                "confirmed continuous outcome."
+            ),
             "rationale": (
-                "A single continuous outcome with confirmed predictors or covariates "
-                "requires a linear regression model."
+                f"A single continuous outcome with an {'adjusted' if adjusted else 'unadjusted'} "
+                "confirmed predictor contract requires a linear regression model."
             ),
             "assumptions": [
                 "Check linearity, residual distribution, heteroscedasticity, collinearity, and influential observations.",
                 "Report heteroscedasticity-consistent uncertainty when diagnostics require it.",
             ],
-            "effect": "adjusted_regression_coefficient",
+            "effect": (
+                "adjusted_regression_coefficient"
+                if adjusted
+                else "unadjusted_regression_coefficient"
+            ),
             "table": "linear_model_coefficients",
-            "figure": "adjusted_effects_and_diagnostics",
+            "figure": (
+                "adjusted_effects_and_diagnostics"
+                if adjusted
+                else "unadjusted_effect_and_diagnostics"
+            ),
         },
         "logistic_regression": {
-            "estimand": "Adjusted association with the confirmed binary outcome.",
+            "estimand": (
+                f"{'Adjusted' if adjusted else 'Unadjusted'} association with the "
+                "confirmed binary outcome."
+            ),
             "rationale": (
-                "A single binary outcome with confirmed predictors or covariates requires "
-                "a logistic regression model."
+                f"A single binary outcome with an {'adjusted' if adjusted else 'unadjusted'} "
+                "confirmed predictor contract requires a logistic regression model."
             ),
             "assumptions": [
                 "Check outcome coding, separation, sparse data, continuous-predictor linearity on the logit scale, collinearity, and influence.",
                 "Escalate separation or non-convergence as an execution error rather than changing the estimand silently.",
             ],
-            "effect": "adjusted_odds_ratio",
+            "effect": "adjusted_odds_ratio" if adjusted else "unadjusted_odds_ratio",
             "table": "logistic_model_coefficients",
-            "figure": "adjusted_odds_ratios_and_diagnostics",
+            "figure": (
+                "adjusted_odds_ratios_and_diagnostics"
+                if adjusted
+                else "unadjusted_odds_ratio_and_diagnostics"
+            ),
         },
     }
     return contracts[choice.method]
@@ -209,8 +262,10 @@ def _inferential_item(
     choice: PlanChoice,
     variables: list[str],
     warnings: list[str],
+    *,
+    adjusted: bool,
 ) -> PlanItem:
-    contract = _method_contract(choice)
+    contract = _method_contract(choice, adjusted=adjusted)
     return PlanItem(
         id="primary_outcome",
         estimand=str(contract["estimand"]),
@@ -242,7 +297,23 @@ def _primary_choice(
     if predictors == 0:
         return None
 
-    if covariates or len(exposures) > 1:
+    if len(exposures) > 1:
+        raise BlockingPlanError("multiple_exposures_unsupported")
+
+    if brief.design == "repeated":
+        if covariates:
+            raise BlockingPlanError("unsupported_repeated_adjustment")
+        if len(exposures) != 1:
+            raise BlockingPlanError("unsupported_repeated_design")
+        if outcome_kind != "continuous":
+            raise BlockingPlanError("unsupported_repeated_outcome")
+        if exposure_kinds != ["binary"]:
+            raise BlockingPlanError("unsupported_repeated_design")
+        if profile.variables[exposures[0]].unique_values != 2:
+            raise BlockingPlanError("unsupported_repeated_design")
+        return choose_group_method(outcome_kind, 2, paired=True)
+
+    if covariates:
         if outcome_kind == "continuous":
             return PlanChoice("linear_regression")
         if outcome_kind == "binary":
@@ -253,18 +324,10 @@ def _primary_choice(
     exposure_kind = exposure_kinds[0]
     if exposure_kind in {"binary", "categorical"}:
         groups = profile.variables[exposure].unique_values
-        return choose_group_method(
-            outcome_kind,
-            groups,
-            paired=brief.design == "repeated",
-        )
+        return choose_group_method(outcome_kind, groups, paired=False)
     if exposure_kind == "continuous" and outcome_kind == "continuous":
-        if brief.design == "repeated":
-            raise BlockingPlanError("unsupported_or_unconfirmed_design")
         return PlanChoice("pearson_or_spearman")
     if exposure_kind == "continuous" and outcome_kind == "binary":
-        if brief.design == "repeated":
-            raise BlockingPlanError("unsupported_or_unconfirmed_design")
         return PlanChoice("logistic_regression")
     raise BlockingPlanError("unsupported_or_unconfirmed_design")
 
@@ -303,6 +366,36 @@ def build_plan(
         if error is not None:
             blocking_errors.append(error)
 
+    if len(brief.exposure_variables) > 1:
+        blocking_errors.append("multiple_exposures_unsupported")
+
+    if brief.design == "repeated":
+        repeated_structure_supported = not blocking_errors
+        if brief.covariates:
+            blocking_errors.append("unsupported_repeated_adjustment")
+            repeated_structure_supported = False
+        if len(brief.exposure_variables) != 1:
+            if len(brief.exposure_variables) <= 1:
+                blocking_errors.append("unsupported_repeated_design")
+            repeated_structure_supported = False
+        if outcome_kind is not None and outcome_kind != "continuous":
+            blocking_errors.append("unsupported_repeated_outcome")
+            repeated_structure_supported = False
+        if exposure_kinds and exposure_kinds != ["binary"]:
+            blocking_errors.append("unsupported_repeated_design")
+            repeated_structure_supported = False
+        if (
+            len(brief.exposure_variables) == 1
+            and exposure_kinds == ["binary"]
+            and profile.variables[brief.exposure_variables[0]].unique_values != 2
+        ):
+            blocking_errors.append("unsupported_repeated_design")
+            repeated_structure_supported = False
+        if repeated_structure_supported:
+            pair_error = _validate_pair_id(brief, profile, roles)
+            if pair_error is not None:
+                blocking_errors.append(pair_error)
+
     if blocking_errors:
         return AnalysisPlan(
             version=PLAN_VERSION,
@@ -313,6 +406,8 @@ def build_plan(
     variables = _ordered_unique(
         brief.outcome_variables + brief.exposure_variables + brief.covariates
     )
+    if brief.design == "repeated" and brief.pair_id_variable is not None:
+        variables.append(brief.pair_id_variable)
     try:
         choice = _primary_choice(brief, profile, outcome_kind or "", exposure_kinds)
     except BlockingPlanError as exc:
@@ -324,5 +419,12 @@ def build_plan(
 
     items = [_descriptive_item(variables, warnings)]
     if choice is not None:
-        items.append(_inferential_item(choice, variables, warnings))
+        items.append(
+            _inferential_item(
+                choice,
+                variables,
+                warnings,
+                adjusted=bool(brief.covariates),
+            )
+        )
     return AnalysisPlan(version=PLAN_VERSION, items=items, warnings=warnings)

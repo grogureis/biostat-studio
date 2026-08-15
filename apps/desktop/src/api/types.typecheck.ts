@@ -8,4 +8,15 @@ const briefWithServerDefaults: StudyBrief = {
   outcome_variables: ["event_30_day"],
 };
 
+const repeatedBrief: StudyBrief = {
+  title: "Repeated outcome",
+  question: "Does the outcome differ between conditions?",
+  hypothesis: "The paired conditions differ.",
+  design: "repeated",
+  outcome_variables: ["score"],
+  exposure_variables: ["condition"],
+  pair_id_variable: "participant_id",
+};
+
 void briefWithServerDefaults;
+void repeatedBrief;

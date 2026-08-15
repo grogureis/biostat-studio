@@ -32,7 +32,22 @@ def test_study_brief_defaults_optional_request_fields():
 
     assert brief.exposure_variables == []
     assert brief.covariates == []
+    assert brief.pair_id_variable is None
     assert brief.language == "en"
+
+
+def test_study_brief_accepts_optional_pair_identifier():
+    brief = StudyBrief(
+        title="Repeated outcome",
+        question="Does the outcome differ between conditions?",
+        hypothesis="The paired conditions differ.",
+        design="repeated",
+        outcome_variables=["score"],
+        exposure_variables=["condition"],
+        pair_id_variable="participant_id",
+    )
+
+    assert brief.pair_id_variable == "participant_id"
 
 
 def test_analysis_result_serializes_complete_provenance():
