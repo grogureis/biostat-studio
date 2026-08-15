@@ -46,8 +46,22 @@ AUDIT_STATUSES = frozenset(
 AUDIT_EVENT_FIELDS = frozenset(
     {"type", "actor", "plan_version", "data_fingerprint", "status", "method_ids"}
 )
+VERTICAL_SLICE_METHOD_IDS = frozenset(
+    {
+        "descriptive_summary",
+        "welch_t_test",
+        "mann_whitney_u",
+        "paired_t_test",
+        "wilcoxon_signed_rank",
+        "welch_anova",
+        "kruskal_wallis",
+        "chi_square_or_fisher",
+        "pearson_or_spearman",
+        "linear_regression",
+        "logistic_regression",
+    }
+)
 FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
-METHOD_ID = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 
 
 @dataclass(frozen=True)
@@ -120,9 +134,10 @@ class AuditEvent:
             not isinstance(method_ids_value, list)
             or not method_ids_value
             or not all(
-                isinstance(method_id, str) and METHOD_ID.fullmatch(method_id)
+                isinstance(method_id, str) and method_id in VERTICAL_SLICE_METHOD_IDS
                 for method_id in method_ids_value
             )
+            or len(set(method_ids_value)) != len(method_ids_value)
         ):
             raise TypeError("invalid_audit_method_ids")
         else:

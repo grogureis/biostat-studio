@@ -231,6 +231,45 @@ def test_audit_event_accepts_only_typed_safe_provenance_fields(
     assert event["recorded_at"].endswith("+00:00")
 
 
+def test_audit_method_ids_require_known_unique_identifiers_in_caller_order(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    """Identifier-shaped patient or unknown values must not become audit provenance."""
+    source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", "age"])
+    project = create_project(tmp_path / "cardio.biostat", brief, profile_excel(source))
+
+    append_audit_event(
+        project,
+        {
+            "type": "analysis_completed",
+            "actor": "system",
+            "method_ids": ["logistic_regression", "welch_t_test"],
+        },
+    )
+    for invalid_method_ids in (
+        ["patient_001"],
+        ["unknown_method"],
+        ["welch_t_test", "welch_t_test"],
+    ):
+        with pytest.raises(TypeError, match="invalid_audit_method_ids"):
+            append_audit_event(
+                project,
+                {
+                    "type": "analysis_completed",
+                    "actor": "system",
+                    "method_ids": invalid_method_ids,
+                },
+            )
+
+    events = [
+        json.loads(line)
+        for line in project.audit_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["method_ids"] for event in events] == [
+        ["logistic_regression", "welch_t_test"]
+    ]
+
+
 def test_project_rejects_symlinked_artifact_root_without_touching_outside_directory(
     tmp_path: Path, brief: StudyBrief
 ) -> None:
