@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "descriptive_summary",
+      "estimand": "Distribution, completeness, and uncertainty of the confirmed analysis variables.",
+      "method": "descriptive_summary",
+      "rationale": "Summarize the confirmed analysis variables before inferential analysis; research-question prose does not determine this method.",
+      "required_variables": [
+        "age_years",
+        "treatment_group"
+      ],
+      "assumptions": [
+        "Variable roles and measurement kinds remain as confirmed in this plan version.",
+        "Report denominators and missingness for every summary without imputing values."
+      ],
+      "robust_alternative": null,
+      "multiplicity_strategy": "not_applicable",
+      "outputs": [
+        "effect_size:standardized_descriptive_estimate",
+        "confidence_interval:95_percent",
+        "table:descriptive_summary",
+        "figure:distribution_overview"
+      ],
+      "blocking_errors": [],
+      "warnings": []
+    },
+    {
+      "id": "primary_outcome",
+      "estimand": "Difference in outcome means between the two independent groups.",
+      "method": "welch_t_test",
+      "rationale": "Welch's t test estimates an independent two-group mean difference without requiring equal group variances.",
+      "required_variables": [
+        "age_years",
+        "treatment_group"
+      ],
+      "assumptions": [
+        "Observations are independent within and between confirmed groups.",
+        "Check missingness, outcome scale, distribution shape, and influential outliers.",
+        "Use the robust alternative only when distribution, outliers, scale, and estimand support it; a normality p-value alone is insufficient."
+      ],
+      "robust_alternative": "mann_whitney_u",
+      "multiplicity_strategy": "not_applicable_single_primary_analysis",
+      "outputs": [
+        "effect_size:hedges_g_and_mean_difference",
+        "confidence_interval:95_percent",
+        "table:two_group_comparison",
+        "figure:group_distribution_and_effect"
+      ],
+      "blocking_errors": [],
+      "warnings": []
+    }
+  ],
+  "blocking_errors": [],
+  "warnings": []
+}

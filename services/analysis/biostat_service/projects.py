@@ -14,6 +14,7 @@ from typing import Any, Mapping
 
 from biostat_service.contracts import StudyBrief
 from biostat_service.data_intake import DataProfile, DataWarning, VariableMetadata
+from biostat_service.study_model import VERTICAL_SLICE_METHOD_IDS
 
 
 SCHEMA_VERSION = 1
@@ -45,21 +46,6 @@ AUDIT_STATUSES = frozenset(
 )
 AUDIT_EVENT_FIELDS = frozenset(
     {"type", "actor", "plan_version", "data_fingerprint", "status", "method_ids"}
-)
-VERTICAL_SLICE_METHOD_IDS = frozenset(
-    {
-        "descriptive_summary",
-        "welch_t_test",
-        "mann_whitney_u",
-        "paired_t_test",
-        "wilcoxon_signed_rank",
-        "welch_anova",
-        "kruskal_wallis",
-        "chi_square_or_fisher",
-        "pearson_or_spearman",
-        "linear_regression",
-        "logistic_regression",
-    }
 )
 FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
 
