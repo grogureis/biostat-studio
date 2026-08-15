@@ -22,6 +22,20 @@ FIXTURE_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "cor
 WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 
 
+def _complete_docx_payload(path: Path) -> bytes:
+    """Return every uncompressed ZIP member plus its name for leak detection."""
+    with ZipFile(path) as archive:
+        return b"\n".join(
+            name.encode("utf-8") + b"\n" + archive.read(name)
+            for name in sorted(archive.namelist())
+        )
+
+
+def _document_text(path: Path) -> str:
+    document = Document(path)
+    return "\n".join(node.text or "" for node in document.element.iter(qn("w:t")))
+
+
 def _item(identifier: str, method: str, variables: list[str]) -> PlanItem:
     return PlanItem(
         id=identifier,
@@ -213,15 +227,121 @@ def test_results_docx_preserves_source_caption_alt_text_and_neutral_metadata(
     assert document.core_properties.author == "BioStat Studio"
     assert document.core_properties.last_modified_by == "BioStat Studio"
 
+    payload = _complete_docx_payload(report_en)
+    assert b"P001" not in payload
+    assert str(FIXTURE_PATH).encode() not in payload
+    assert b"/Users/" not in payload
     with ZipFile(report_en) as archive:
-        payload = "\n".join(
-            archive.read(name).decode("utf-8", errors="ignore")
-            for name in ("word/document.xml", "docProps/core.xml", "word/_rels/document.xml.rels")
-        )
-    assert "P001" not in payload
-    assert str(FIXTURE_PATH) not in payload
-    assert "/Users/" not in payload
-    assert not re.search(r"(?i)\b(?:todo|tbd|placeholder)\b|\{\{", payload)
+        document_xml = archive.read("word/document.xml")
+    assert not re.search(rb"(?i)\b(?:todo|tbd|placeholder)\b|\{\{", document_xml)
+
+
+def test_warning_catalog_localizes_meaning_impact_and_action_without_raw_codes(
+    tmp_path: Path, report_inputs
+) -> None:
+    """Warning codes are internal data and must become deterministic clinical copy."""
+    project, brief, plan, bundle, _figures = report_inputs
+    english = build_results_docx(
+        project, brief, plan, bundle, [], "en", tmp_path / "warning-en.docx"
+    )
+    turkish = build_results_docx(
+        project, brief, plan, bundle, [], "tr", tmp_path / "warning-tr.docx"
+    )
+
+    assert (
+        "Meaning: analysis assumptions need review. Impact: unmet assumptions can make "
+        "results unreliable. Action: review diagnostics before interpretation."
+    ) in _document_text(english)
+    assert (
+        "Anlam: analiz varsayımları gözden geçirilmelidir. Etki: karşılanmayan "
+        "varsayımlar sonuçları güvensiz kılabilir. Eylem: yorumlamadan önce tanıları "
+        "inceleyin."
+    ) in _document_text(turkish)
+    assert b"review_assumptions" not in _complete_docx_payload(english)
+    assert b"review_assumptions" not in _complete_docx_payload(turkish)
+
+
+@pytest.mark.parametrize(
+    "unsafe_warning",
+    [
+        "/private/tmp/patient-007.csv",
+        "/Volumes/Clinic/patient-008.xlsx",
+        "file:///private/tmp/patient-009",
+        "https://example.test/patient-010",
+        "line one\npatient-011",
+        "patient-012 free-form note",
+    ],
+)
+def test_unknown_warning_content_is_replaced_and_absent_from_complete_zip(
+    tmp_path: Path, report_inputs, unsafe_warning: str
+) -> None:
+    """Unknown warning content must never become an exfiltration channel."""
+    project, brief, plan, bundle, _figures = report_inputs
+    plan.warnings = [unsafe_warning]
+    destination = build_results_docx(
+        project, brief, plan, bundle, [], "en", tmp_path / "redacted-warning.docx"
+    )
+
+    assert (
+        "Meaning: an unrecognized analysis warning was recorded. Impact: the specific "
+        "issue cannot be safely described in this report. Action: review the validated "
+        "analysis log before interpretation."
+    ) in _document_text(destination)
+    assert unsafe_warning.encode() not in _complete_docx_payload(destination)
+
+
+def test_structured_warning_ignores_untrusted_detail_fields(
+    tmp_path: Path, report_inputs
+) -> None:
+    """Only an allowlisted structured warning code may cross the report boundary."""
+    project, brief, plan, bundle, _figures = report_inputs
+    plan.warnings = []
+    bundle.warnings = [
+        {
+            "code": "library_warning",
+            "method": "/private/tmp/patient-013",
+            "category": "https://example.test/patient-014",
+        }
+    ]
+    destination = build_results_docx(
+        project, brief, plan, bundle, [], "en", tmp_path / "structured-warning.docx"
+    )
+    payload = _complete_docx_payload(destination)
+
+    assert "Meaning: the statistical library emitted a warning." in _document_text(destination)
+    assert b"/private/tmp/patient-013" not in payload
+    assert b"https://example.test/patient-014" not in payload
+    assert b"library_warning" not in payload
+
+
+@pytest.mark.parametrize(
+    ("field", "unsafe_value"),
+    [
+        ("exclusions", "/private/tmp/patient-015.csv"),
+        ("exclusions", "/Volumes/Clinic/patient-016.xlsx"),
+        ("exclusions", "file:///private/tmp/patient-017"),
+        ("transformations", "https://example.test/patient-018"),
+        ("transformations", "line one\npatient-019"),
+        ("transformations", "patient-020 free-form note"),
+        ("reproducibility", "3.9.6patient-021"),
+        ("reproducibility", "3.9.6\x00patient-022"),
+    ],
+)
+def test_unrecognized_provenance_is_rejected_before_docx_creation(
+    tmp_path: Path, report_inputs, field: str, unsafe_value: str
+) -> None:
+    """Provenance accepts only recognized codes and safe version/count tokens."""
+    project, brief, plan, bundle, _figures = report_inputs
+    if field == "reproducibility":
+        bundle.reproducibility["python"] = unsafe_value
+    else:
+        setattr(bundle.provenance, field, [unsafe_value])
+    destination = tmp_path / "unsafe-provenance.docx"
+
+    with pytest.raises(ValueError, match="unsafe_reproducibility_metadata"):
+        build_results_docx(project, brief, plan, bundle, [], "en", destination)
+
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize(

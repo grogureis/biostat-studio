@@ -34,7 +34,19 @@ HEADING_3_COLOR = "2F635B"
 TABLE_HEADER_FILL = "E8EFE9"
 TERRACOTTA = "D66E47"
 TABLE_BORDER_COLOR = "AABAB8"
+MAX_FIGURE_WIDTH_INCHES = 5.0
 SAFE_FINGERPRINT = re.compile(r"[0-9a-f]{64}\Z")
+SAFE_VERSION = re.compile(
+    r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){1,3}\Z"
+)
+SAFE_EXCLUSION = re.compile(
+    r"(?:complete_case|paired_complete_case):"
+    r"input=(?P<input>[0-9]+);used=(?P<used>[0-9]+);missing=(?P<missing>[0-9]+)\Z"
+)
+SAFE_SOFTWARE_COMPONENTS = frozenset(
+    {"python", "numpy", "pandas", "scipy", "statsmodels"}
+)
+SAFE_TRANSFORMATIONS = frozenset({"deterministic_complete_case_execution"})
 OBSERVATIONAL_DESIGNS = frozenset({"cross_sectional", "cohort", "case_control"})
 FIXED_METADATA_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
@@ -74,7 +86,6 @@ RESULT_LABELS = {
             "Note. CI = confidence interval; n = analyzed units. "
             "Exact p values are shown when available."
         ),
-        "warning_note": "Material analysis warning: {warning}.",
         "plan_version": "Plan version: {value}",
         "fingerprint": "Source fingerprint prefix: {value}",
         "software": "Software versions: {value}",
@@ -116,13 +127,120 @@ RESULT_LABELS = {
             "Not. GA = güven aralığı; n = analiz edilen birimler. "
             "Kesin p değerleri mevcut olduğunda gösterilir."
         ),
-        "warning_note": "Önemli analiz uyarısı: {warning}.",
         "plan_version": "Plan sürümü: {value}",
         "fingerprint": "Kaynak parmak izi öneki: {value}",
         "software": "Yazılım sürümleri: {value}",
         "exclusions": "Dışlamalar: {value}",
         "transformations": "Dönüşümler: {value}",
         "random_seed": "Rastgelelik tohumu: kullanılmadı",
+    },
+}
+
+WARNING_CATALOG = {
+    "en": {
+        "review_assumptions": (
+            "Meaning: analysis assumptions need review. Impact: unmet assumptions can "
+            "make results unreliable. Action: review diagnostics before interpretation."
+        ),
+        "data_profile:empty_column": (
+            "Meaning: a planned variable has no observed values. Impact: analyses using "
+            "that variable may not be estimable. Action: review data completeness and the "
+            "confirmed analysis plan."
+        ),
+        "data_profile:mixed_types": (
+            "Meaning: a planned variable contains mixed data types. Impact: coercion or "
+            "coding choices may affect the analysis. Action: verify the variable type and "
+            "coding before interpretation."
+        ),
+        "data_profile:non_finite_values": (
+            "Meaning: a planned variable contains non-finite numeric values. Impact: "
+            "affected rows may be excluded or the analysis may be invalid. Action: review "
+            "the source data and exclusion counts."
+        ),
+        "data_profile:duplicated_identifier": (
+            "Meaning: an identifier-labelled variable contains duplicates. Impact: unit "
+            "or pair definitions may be ambiguous. Action: verify identifier uniqueness "
+            "before interpretation."
+        ),
+        "data_profile:suspicious_identifier_leakage": (
+            "Meaning: an identifier-labelled variable may contain identifying information. "
+            "Impact: privacy could be compromised if it is included in analysis artifacts. "
+            "Action: confirm de-identification and exclude identifiers from reporting."
+        ),
+        "zero_cell_odds_ratio_corrected": (
+            "Meaning: a zero contingency-table cell required a continuity correction. "
+            "Impact: the odds-ratio estimate is correction-dependent. Action: interpret "
+            "the estimate with the exact test and cell sparsity in mind."
+        ),
+        "fisher_odds_ratio_non_finite": (
+            "Meaning: the Fisher-test odds ratio was not finite. Impact: the effect estimate "
+            "cannot be interpreted as a finite ratio. Action: review the contingency table "
+            "and report the exact test result with this limitation."
+        ),
+        "library_warning": (
+            "Meaning: the statistical library emitted a warning. Impact: numerical "
+            "stability or model assumptions may affect the result. Action: review the "
+            "validated diagnostics before interpretation."
+        ),
+        "unknown": (
+            "Meaning: an unrecognized analysis warning was recorded. Impact: the specific "
+            "issue cannot be safely described in this report. Action: review the validated "
+            "analysis log before interpretation."
+        ),
+    },
+    "tr": {
+        "review_assumptions": (
+            "Anlam: analiz varsayımları gözden geçirilmelidir. Etki: karşılanmayan "
+            "varsayımlar sonuçları güvensiz kılabilir. Eylem: yorumlamadan önce "
+            "tanıları inceleyin."
+        ),
+        "data_profile:empty_column": (
+            "Anlam: planlanan bir değişkende gözlenen değer yoktur. Etki: bu değişkeni "
+            "kullanan analizler tahmin edilemeyebilir. Eylem: veri tamlığını ve onaylanmış "
+            "analiz planını gözden geçirin."
+        ),
+        "data_profile:mixed_types": (
+            "Anlam: planlanan bir değişken karma veri türleri içerir. Etki: dönüştürme "
+            "veya kodlama seçimleri analizi etkileyebilir. Eylem: yorumlamadan önce değişken "
+            "türünü ve kodlamayı doğrulayın."
+        ),
+        "data_profile:non_finite_values": (
+            "Anlam: planlanan bir değişken sonlu olmayan sayısal değerler içerir. Etki: "
+            "etkilenen satırlar dışlanabilir veya analiz geçersiz olabilir. Eylem: kaynak "
+            "veriyi ve dışlama sayılarını gözden geçirin."
+        ),
+        "data_profile:duplicated_identifier": (
+            "Anlam: tanımlayıcı olarak etiketlenen bir değişken yinelenen değerler içerir. "
+            "Etki: birim veya çift tanımları belirsiz olabilir. Eylem: yorumlamadan önce "
+            "tanımlayıcı benzersizliğini doğrulayın."
+        ),
+        "data_profile:suspicious_identifier_leakage": (
+            "Anlam: tanımlayıcı olarak etiketlenen bir değişken kimlik bilgisi içerebilir. "
+            "Etki: analiz yapıtlarına eklenirse gizlilik tehlikeye girebilir. Eylem: "
+            "kimliksizleştirmeyi "
+            "doğrulayın ve tanımlayıcıları raporlamadan dışlayın."
+        ),
+        "zero_cell_odds_ratio_corrected": (
+            "Anlam: sıfır kontenjans tablosu hücresi süreklilik düzeltmesi gerektirdi. Etki: "
+            "olasılık oranı tahmini düzeltmeye bağlıdır. Eylem: tahmini kesin test "
+            "ve seyrek "
+            "hücreler ile birlikte yorumlayın."
+        ),
+        "fisher_odds_ratio_non_finite": (
+            "Anlam: Fisher testi olasılık oranı sonlu değildir. Etki: etki tahmini sonlu bir "
+            "oran olarak yorumlanamaz. Eylem: kontenjans tablosunu gözden geçirin ve kesin test "
+            "sonucunu bu sınırlılıkla raporlayın."
+        ),
+        "library_warning": (
+            "Anlam: istatistik kütüphanesi bir uyarı verdi. Etki: sayısal kararlılık veya "
+            "model varsayımları sonucu etkileyebilir. Eylem: yorumlamadan önce doğrulanmış "
+            "tanıları gözden geçirin."
+        ),
+        "unknown": (
+            "Anlam: tanınmayan bir analiz uyarısı kaydedildi. Etki: belirli sorun bu raporda "
+            "güvenli biçimde açıklanamaz. Eylem: yorumlamadan önce doğrulanmış analiz "
+            "günlüğünü inceleyin."
+        ),
     },
 }
 
@@ -538,7 +656,7 @@ def _add_figures(
         picture.paragraph_format.keep_together = True
         run = picture.add_run()
         inline_shape = run.add_picture(
-            str(png_path), width=Inches(min(artifact.width_inches, 6.5))
+            str(png_path), width=Inches(min(artifact.width_inches, MAX_FIGURE_WIDTH_INCHES))
         )
         inline_shape._inline.docPr.set("descr", artifact.alt_text)
         inline_shape._inline.docPr.set("title", f"{labels['figure']} {number}")
@@ -546,15 +664,21 @@ def _add_figures(
         caption.paragraph_format.keep_together = True
 
 
-def _safe_warning_text(warning: object) -> str:
+def _warning_catalog_key(warning: object) -> str:
+    """Map a structured warning to an allowlisted key without retaining raw details."""
     if isinstance(warning, dict):
-        pieces = [str(warning[key]) for key in sorted(warning) if key in {"code", "method", "category"}]
-        text = ":".join(pieces)
-    else:
-        text = str(warning)
-    if not text or any(token in text for token in ("/Users/", "\\", "..")):
-        raise ValueError("unsafe_report_warning")
-    return text
+        return "library_warning" if warning.get("code") == "library_warning" else "unknown"
+    if not isinstance(warning, str):
+        return "unknown"
+    if warning in WARNING_CATALOG["en"] and warning != "unknown":
+        return warning
+    if warning.startswith("data_profile:"):
+        parts = warning.split(":", 2)
+        key = f"data_profile:{parts[1]}" if len(parts) == 3 else "unknown"
+        return key if key in WARNING_CATALOG["en"] else "unknown"
+    if warning.startswith("library_warning:"):
+        return "library_warning"
+    return "unknown"
 
 
 def _add_warnings(
@@ -570,16 +694,43 @@ def _add_warnings(
         return
     labels = RESULT_LABELS[language]
     document.add_heading(labels["warnings"], level=2)
-    for warning in dict.fromkeys(_safe_warning_text(value) for value in warnings):
-        paragraph = document.add_paragraph(labels["warning_note"].format(warning=warning))
+    keys = dict.fromkeys(_warning_catalog_key(value) for value in warnings)
+    for key in keys:
+        paragraph = document.add_paragraph(WARNING_CATALOG[language][key])
         paragraph.paragraph_format.keep_together = True
 
 
-def _join_codes(values: Sequence[str], fallback: str) -> str:
-    cleaned = [value for value in values if value]
-    if any("/Users/" in value or "\\" in value or ".." in value for value in cleaned):
-        raise ValueError("unsafe_reproducibility_metadata")
+def _safe_exclusions(values: Sequence[str], fallback: str) -> str:
+    cleaned: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise ValueError("unsafe_reproducibility_metadata")
+        match = SAFE_EXCLUSION.fullmatch(value)
+        if match is None:
+            raise ValueError("unsafe_reproducibility_metadata")
+        counts = {name: int(token) for name, token in match.groupdict().items()}
+        if counts["used"] + counts["missing"] != counts["input"]:
+            raise ValueError("unsafe_reproducibility_metadata")
+        cleaned.append(value)
     return "; ".join(dict.fromkeys(cleaned)) if cleaned else fallback
+
+
+def _safe_transformations(values: Sequence[str], fallback: str) -> str:
+    if any(not isinstance(value, str) or value not in SAFE_TRANSFORMATIONS for value in values):
+        raise ValueError("unsafe_reproducibility_metadata")
+    cleaned = list(dict.fromkeys(values))
+    return "; ".join(cleaned) if cleaned else fallback
+
+
+def _safe_software_versions(versions: dict[str, str]) -> str:
+    if set(versions) != SAFE_SOFTWARE_COMPONENTS:
+        raise ValueError("unsafe_reproducibility_metadata")
+    if any(
+        not isinstance(value, str) or SAFE_VERSION.fullmatch(value) is None
+        for value in versions.values()
+    ):
+        raise ValueError("unsafe_reproducibility_metadata")
+    return "; ".join(f"{name} {versions[name]}" for name in sorted(versions))
 
 
 def _add_reproducibility_appendix(
@@ -591,22 +742,22 @@ def _add_reproducibility_appendix(
     provenance = bundle.provenance
     if not SAFE_FINGERPRINT.fullmatch(provenance.data_fingerprint):
         raise ValueError("invalid_report_fingerprint")
-    document.add_heading(labels["reproducibility"], level=2)
-    versions = "; ".join(
-        f"{name} {version}" for name, version in sorted(bundle.reproducibility.items())
+    if type(provenance.plan_version) is not int or provenance.plan_version < 1:
+        raise ValueError("unsafe_reproducibility_metadata")
+    versions = _safe_software_versions(bundle.reproducibility)
+    exclusions = _safe_exclusions(provenance.exclusions, labels["not_applicable"])
+    transformations = _safe_transformations(
+        provenance.transformations, labels["not_applicable"]
     )
+    document.add_heading(labels["reproducibility"], level=2)
     entries = (
         labels["plan_version"].format(value=provenance.plan_version),
         labels["fingerprint"].format(
             value=provenance.data_fingerprint[:FINGERPRINT_PREFIX_LENGTH]
         ),
         labels["software"].format(value=versions),
-        labels["exclusions"].format(
-            value=_join_codes(provenance.exclusions, labels["not_applicable"])
-        ),
-        labels["transformations"].format(
-            value=_join_codes(provenance.transformations, labels["not_applicable"])
-        ),
+        labels["exclusions"].format(value=exclusions),
+        labels["transformations"].format(value=transformations),
         labels["random_seed"],
     )
     for entry in entries:
