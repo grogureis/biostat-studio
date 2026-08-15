@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "package:mac": "electron-builder --mac"
   },

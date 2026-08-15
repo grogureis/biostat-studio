@@ -18,7 +18,8 @@ const labels = {
     selected: "Selected workbook",
     approve: "Approve data structure",
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
-    pickerFailure: "The workbook picker could not be opened. Try again.",
+  pickerFailure: "The workbook picker could not be opened. Try again.",
+    observations: "observations",
   },
   tr: {
     eyebrow: "02 / Veri kökeni",
@@ -29,7 +30,8 @@ const labels = {
     selected: "Seçilen çalışma kitabı",
     approve: "Veri yapısını onayla",
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
-    pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
+  pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
+    observations: "gözlem",
   },
 } as const;
 
@@ -40,11 +42,13 @@ function basename(path: string): string {
 export function DataIntake({ api, dataFile, language, onFile }: DataIntakeProps) {
   const copy = labels[language];
   const [pickerFailed, setPickerFailed] = useState(false);
+  const [rows, setRows] = useState<number | null>(null);
   const chooseFile = async () => {
     try {
       const path = await api.selectDataFile();
       setPickerFailed(false);
       onFile(path);
+      setRows(path && api.profileData ? (await api.profileData()).rows : null);
     } catch {
       setPickerFailed(true);
     }
@@ -62,6 +66,7 @@ export function DataIntake({ api, dataFile, language, onFile }: DataIntakeProps)
         <div>
           <p className="drop-title">{dataFile ? copy.selected : copy.noFile}</p>
           {dataFile && <p className="file-name">{basename(dataFile)}</p>}
+          {rows !== null ? <p className="form-help">{rows} {copy.observations}</p> : null}
           <p className="form-help">{copy.privacy}</p>
         </div>
         <button type="button" className="primary-action" onClick={chooseFile}>{copy.import}</button>
