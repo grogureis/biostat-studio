@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import date
 from hashlib import sha256
+import json
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -25,7 +26,7 @@ def file_sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
-def write_workbook(path: Path, headers: list[str], rows: list[list[object]]) -> Path:
+def write_workbook(path: Path, headers: list[object], rows: list[list[object]]) -> Path:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Quality"
@@ -79,6 +80,51 @@ def test_profile_excel_emits_value_free_quality_warnings(tmp_path: Path) -> None
     assert profile.variables["comment"].kind == "free-text"
     assert profile.variables["patient_id"].kind == "identifier-candidate"
     assert "patient-001" not in str(asdict(profile))
+
+
+def test_identifier_label_warnings_do_not_require_high_uniqueness(tmp_path: Path) -> None:
+    """Low-uniqueness patient identifiers must not bypass safety warnings."""
+    workbook = write_workbook(
+        tmp_path / "repeated-patients.xlsx",
+        ["patient_id"],
+        [
+            ["patient-001"],
+            ["patient-001"],
+            ["patient-002"],
+            ["patient-002"],
+            ["patient-003"],
+        ],
+    )
+
+    profile = profile_excel(workbook)
+
+    warning_codes = {warning.code for warning in profile.warnings}
+    assert {"duplicated_identifier", "suspicious_identifier_leakage"} <= warning_codes
+    assert "patient-001" not in str(asdict(profile))
+
+
+def test_profile_excel_preserves_raw_numeric_headers_with_json_safe_lookup(tmp_path: Path) -> None:
+    """Stringifying a numeric Excel header must not discard its original type."""
+    workbook = write_workbook(
+        tmp_path / "numeric-header.xlsx",
+        [2026, "cohort"],
+        [[1, "A"], [2, "B"], [3, "A"]],
+    )
+
+    profile = profile_excel(workbook)
+
+    numeric_column = profile.variables["int:2026"]
+    assert numeric_column.source_label == 2026
+    assert numeric_column.original_name == "2026"
+    assert numeric_column.display_name == "2026"
+    assert "cohort" in profile.variables
+    assert json.dumps(
+        {
+            "lookup_key": "int:2026",
+            "original_name": numeric_column.original_name,
+            "display_name": numeric_column.display_name,
+        }
+    )
 
 
 def test_profile_excel_rejects_unknown_sheet_without_changing_source(core_workbook: Path) -> None:

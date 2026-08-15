@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from hashlib import sha256
 from numbers import Number
 from pathlib import Path
@@ -26,6 +27,7 @@ IDENTIFIER_NAME = re.compile(
 class VariableMetadata:
     """Inferred metadata while retaining the workbook's original label."""
 
+    source_label: Any
     original_name: str
     display_name: str
     kind: str
@@ -74,6 +76,24 @@ def display_label(name: object) -> str:
     return re.sub(r"\s+", " ", label.replace("_", " ").replace("-", " ")).capitalize()
 
 
+def json_safe_label(label: object) -> str:
+    """Represent a source header deterministically for API and mapping use."""
+    if isinstance(label, np.generic):
+        label = label.item()
+    if isinstance(label, (pd.Timestamp, datetime, date)):
+        return label.isoformat()
+    return str(label)
+
+
+def variable_key(label: object) -> str:
+    """Keep string labels backward compatible and type-tag non-string labels."""
+    if isinstance(label, str):
+        return label
+    if isinstance(label, np.generic):
+        label = label.item()
+    return f"{type(label).__name__}:{json_safe_label(label)}"
+
+
 def _value_family(value: Any) -> str:
     if isinstance(value, (pd.Timestamp, np.datetime64)):
         return "date"
@@ -90,7 +110,8 @@ def _is_identifier_name(name: str) -> bool:
 
 def infer_variable(series: pd.Series) -> VariableMetadata:
     """Infer one stable display type using only column-level properties."""
-    name = str(series.name)
+    source_label = series.name
+    name = json_safe_label(source_label)
     values = series.dropna()
     non_missing = int(values.shape[0])
     missing = int(series.isna().sum())
@@ -124,6 +145,7 @@ def infer_variable(series: pd.Series) -> VariableMetadata:
             kind = "free-text"
 
     return VariableMetadata(
+        source_label=source_label,
         original_name=name,
         display_name=display_label(name),
         kind=kind,
@@ -139,7 +161,7 @@ def quality_warnings(
     """Return deterministic quality warnings without exposing any source cell values."""
     warnings: list[DataWarning] = []
     for column in frame.columns:
-        name = str(column)
+        name = variable_key(column)
         series = frame[column]
         metadata = variables[name]
         values = series.dropna()
@@ -148,31 +170,30 @@ def quality_warnings(
             warnings.append(
                 DataWarning("empty_column", name, "Column contains no non-missing values.")
             )
-            continue
-
-        families = {_value_family(value) for value in values}
-        if "number" in families and "text" in families:
-            warnings.append(
-                DataWarning("mixed_types", name, "Column contains mixed value types.")
-            )
-
-        numeric = pd.to_numeric(values, errors="coerce")
-        finite_numeric = numeric.dropna()
-        if not finite_numeric.empty and not np.isfinite(finite_numeric.astype(float)).all():
-            warnings.append(
-                DataWarning("non_finite_values", name, "Column contains non-finite numeric values.")
-            )
-
-        if metadata.kind == "identifier-candidate":
-            if values.duplicated().any():
+        else:
+            families = {_value_family(value) for value in values}
+            if "number" in families and "text" in families:
                 warnings.append(
-                    DataWarning("duplicated_identifier", name, "Identifier candidate contains duplicates.")
+                    DataWarning("mixed_types", name, "Column contains mixed value types.")
+                )
+
+            numeric = pd.to_numeric(values, errors="coerce")
+            finite_numeric = numeric.dropna()
+            if not finite_numeric.empty and not np.isfinite(finite_numeric.astype(float)).all():
+                warnings.append(
+                    DataWarning("non_finite_values", name, "Column contains non-finite numeric values.")
+                )
+
+        if _is_identifier_name(metadata.original_name):
+            if not values.empty and values.duplicated().any():
+                warnings.append(
+                    DataWarning("duplicated_identifier", name, "Identifier-labelled column contains duplicates.")
                 )
             warnings.append(
                 DataWarning(
                     "suspicious_identifier_leakage",
                     name,
-                    "Identifier candidate may require de-identification before analysis.",
+                    "Identifier-labelled column may require de-identification before analysis.",
                 )
             )
     return tuple(warnings)
@@ -189,7 +210,9 @@ def profile_excel(path: Path, sheet: str | None = None) -> DataProfile:
             raise ValueError("unknown_sheet")
         frame = pd.read_excel(book, sheet_name=selected)
 
-    variables = {str(column): infer_variable(frame[column]) for column in frame.columns}
+    variables = {
+        variable_key(column): infer_variable(frame[column]) for column in frame.columns
+    }
     after = sha256_file(source)
     if before != after:
         raise RuntimeError("source_file_changed")
