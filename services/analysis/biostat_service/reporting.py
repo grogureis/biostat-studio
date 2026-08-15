@@ -47,6 +47,7 @@ SAFE_SOFTWARE_COMPONENTS = frozenset(
     {"python", "numpy", "pandas", "scipy", "statsmodels"}
 )
 SAFE_TRANSFORMATIONS = frozenset({"deterministic_complete_case_execution"})
+REPORT_FIGURE_METHODS = frozenset({"welch_t_test", "paired_t_test", "welch_anova"})
 OBSERVATIONAL_DESIGNS = frozenset({"cross_sectional", "cohort", "case_control"})
 FIXED_METADATA_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
@@ -109,7 +110,7 @@ RESULT_LABELS = {
         "p_value": "p değeri",
         "effect": "Etki büyüklüğü",
         "not_estimable": "Tahmin edilemedi",
-        "not_applicable": "Uygulanamaz",
+        "not_applicable": "—",
         "narrative": (
             "{analysis} analizi n = {n} analiz birimi içerdi (eksik = {missing}). "
             "Tahmin edilen {parameter} {estimate} idi (%95 GA [{lower}, {upper}]), "
@@ -133,6 +134,51 @@ RESULT_LABELS = {
         "exclusions": "Dışlamalar: {value}",
         "transformations": "Dönüşümler: {value}",
         "random_seed": "Rastgelelik tohumu: kullanılmadı",
+    },
+}
+
+FIGURE_PROSE = {
+    "en": {
+        "caption": (
+            "Figure {number}. Distribution for the planned outcome by planned exposure "
+            "group; points show individual complete-case observations (n = {n})."
+        ),
+        "alt": (
+            "Group comparison figure showing individual complete-case observations and "
+            "distributions for the planned outcome across planned exposure groups "
+            "(n = {n})."
+        ),
+        "paired_caption": (
+            "Figure {number}. Distribution for the planned outcome by planned condition; "
+            "points show individual complete-pair observations "
+            "(n = {pairs} pairs ({observations} observations))."
+        ),
+        "paired_alt": (
+            "Paired group comparison figure showing individual complete-pair observations "
+            "and distributions for the planned outcome across planned conditions "
+            "(n = {pairs} pairs ({observations} observations))."
+        ),
+    },
+    "tr": {
+        "caption": (
+            "Şekil {number}. Planlanan sonucun planlanan maruziyet gruplarına göre "
+            "dağılımı; noktalar tam olgu bireysel gözlemlerini gösterir (n = {n})."
+        ),
+        "alt": (
+            "Grup karşılaştırma grafiği, planlanan sonucun planlanan maruziyet "
+            "gruplarındaki tam olgu bireysel gözlemlerini ve dağılımlarını gösterir "
+            "(n = {n})."
+        ),
+        "paired_caption": (
+            "Şekil {number}. Planlanan sonucun planlanan koşullara göre dağılımı; "
+            "noktalar tam çift bireysel gözlemlerini gösterir "
+            "(n = {pairs} çift ({observations} gözlem))."
+        ),
+        "paired_alt": (
+            "Eşleştirilmiş grup karşılaştırma grafiği, planlanan sonucun planlanan "
+            "koşullardaki tam çift bireysel gözlemlerini ve dağılımlarını gösterir "
+            "(n = {pairs} çift ({observations} gözlem))."
+        ),
     },
 }
 
@@ -632,24 +678,55 @@ def _add_result_table(
     note.paragraph_format.keep_together = True
 
 
+def _report_figure_prose(
+    item: PlanItem,
+    result: AnalysisResult,
+    number: int,
+    language: Language,
+) -> tuple[str, str]:
+    """Build value-free caption and alt text from allowlisted report structure."""
+    if type(result.n) is not int or result.n < 0:
+        raise ValueError("invalid_report_figure_counts")
+    labels = FIGURE_PROSE[language]
+    if item.method == "paired_t_test":
+        raw_counts = result.diagnostics.get("counts", {})
+        observations = raw_counts.get("used") if isinstance(raw_counts, dict) else None
+        if type(observations) is not int or observations < 0:
+            raise ValueError("invalid_report_figure_counts")
+        values = {
+            "number": number,
+            "pairs": result.n,
+            "observations": observations,
+        }
+        return (
+            labels["paired_caption"].format(**values),
+            labels["paired_alt"].format(**values),
+        )
+    values = {"number": number, "n": result.n}
+    return labels["caption"].format(**values), labels["alt"].format(**values)
+
+
 def _add_figures(
     document: DocumentType,
+    plan: AnalysisPlan,
+    bundle: AnalysisBundle,
     figures: Sequence[FigureArtifact],
     language: Language,
 ) -> None:
     if not figures:
         return
     labels = RESULT_LABELS[language]
+    expected_items = [item for item in plan.items if item.method in REPORT_FIGURE_METHODS]
+    if [artifact.id for artifact in figures] != [item.id for item in expected_items]:
+        raise ValueError("report_figure_plan_mismatch")
     document.add_heading(labels["figures"], level=2)
-    expected_prefix = f"{labels['figure']} "
-    for number, artifact in enumerate(figures, start=1):
+    for number, (item, artifact) in enumerate(zip(expected_items, figures), start=1):
         png_path = Path(artifact.png_path)
         if artifact.dpi != 300 or png_path.suffix.lower() != ".png" or not png_path.is_file():
             raise ValueError("invalid_report_figure_png")
-        if not artifact.caption.startswith(f"{expected_prefix}{number}."):
-            raise ValueError("figure_caption_language_or_number_mismatch")
-        if not artifact.alt_text.strip():
-            raise ValueError("missing_figure_alt_text")
+        caption_text, alt_text = _report_figure_prose(
+            item, bundle.results[item.id], number, language
+        )
         picture = document.add_paragraph()
         picture.alignment = WD_ALIGN_PARAGRAPH.CENTER
         picture.paragraph_format.keep_with_next = True
@@ -658,9 +735,9 @@ def _add_figures(
         inline_shape = run.add_picture(
             str(png_path), width=Inches(min(artifact.width_inches, MAX_FIGURE_WIDTH_INCHES))
         )
-        inline_shape._inline.docPr.set("descr", artifact.alt_text)
+        inline_shape._inline.docPr.set("descr", alt_text)
         inline_shape._inline.docPr.set("title", f"{labels['figure']} {number}")
-        caption = document.add_paragraph(artifact.caption, style="Caption")
+        caption = document.add_paragraph(caption_text, style="Caption")
         caption.paragraph_format.keep_together = True
 
 
@@ -813,7 +890,7 @@ def build_results_docx(
     document.add_heading(labels["heading"], level=1)
     _add_results_narrative(document, brief, plan, bundle, language)
     _add_result_table(document, plan, bundle, language)
-    _add_figures(document, figures, language)
+    _add_figures(document, plan, bundle, figures, language)
     _add_warnings(document, plan, bundle, language)
     _add_reproducibility_appendix(document, bundle, language)
     document.save(destination)

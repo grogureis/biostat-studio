@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import re
 from zipfile import ZipFile
@@ -210,10 +211,10 @@ def test_results_docx_uses_exact_manuscript_style_and_table_geometry(
     } == {"top": "80", "bottom": "80", "start": "120", "end": "120"}
 
 
-def test_results_docx_preserves_source_caption_alt_text_and_neutral_metadata(
+def test_results_docx_rebuilds_value_free_caption_alt_text_and_neutral_metadata(
     report_en: Path, report_inputs
 ) -> None:
-    """Losing source accessibility text or leaking machine metadata would make export unsafe."""
+    """Report-owned figure prose must remain meaningful without source labels or metadata."""
     _project, _brief, _plan, _bundle, figures = report_inputs
     document = Document(report_en)
     visible_text = "\n".join(node.text or "" for node in document.element.iter(qn("w:t")))
@@ -222,8 +223,18 @@ def test_results_docx_preserves_source_caption_alt_text_and_neutral_metadata(
         for node in document.element.iter(f"{{{WP_NS}}}docPr")
     ]
 
-    assert figures[0].caption in visible_text
-    assert descriptions == [figures[0].alt_text]
+    expected_caption = (
+        "Figure 1. Distribution for the planned outcome by planned exposure group; "
+        "points show individual complete-case observations (n = 11)."
+    )
+    expected_alt = (
+        "Group comparison figure showing individual complete-case observations and "
+        "distributions for the planned outcome across planned exposure groups (n = 11)."
+    )
+    assert expected_caption in visible_text
+    assert descriptions == [expected_alt]
+    assert figures[0].caption not in visible_text
+    assert figures[0].alt_text not in descriptions
     assert document.core_properties.author == "BioStat Studio"
     assert document.core_properties.last_modified_by == "BioStat Studio"
 
@@ -234,6 +245,74 @@ def test_results_docx_preserves_source_caption_alt_text_and_neutral_metadata(
     with ZipFile(report_en) as archive:
         document_xml = archive.read("word/document.xml")
     assert not re.search(rb"(?i)\b(?:todo|tbd|placeholder)\b|\{\{", document_xml)
+
+
+@pytest.mark.parametrize("field", ["caption", "alt_text"])
+@pytest.mark.parametrize(
+    "unsafe_value",
+    [
+        "/private/tmp/patient-023.csv",
+        "/Volumes/Clinic/patient-024.xlsx",
+        "file:///private/tmp/patient-025",
+        "https://example.test/patient-026",
+        "line one\npatient-027",
+        "patient-028 free-form note",
+        "patient-029\x00control",
+    ],
+)
+def test_figure_prose_injections_are_rebuilt_and_absent_from_complete_zip(
+    tmp_path: Path,
+    report_inputs,
+    field: str,
+    unsafe_value: str,
+) -> None:
+    """Caption and alt source fields must not become DOCX privacy channels."""
+    project, brief, plan, bundle, figures = report_inputs
+    replacement = (
+        f"Figure 1. {unsafe_value}" if field == "caption" else unsafe_value
+    )
+    injected = replace(figures[0], **{field: replacement})
+    destination = build_results_docx(
+        project,
+        brief,
+        plan,
+        bundle,
+        [injected],
+        "en",
+        tmp_path / "safe-figure-prose.docx",
+    )
+    payload = _complete_docx_payload(destination)
+    patient_token = re.search(r"patient-[0-9]+", unsafe_value)
+
+    assert patient_token is not None
+    assert patient_token.group().encode() not in payload
+    assert unsafe_value.encode() not in payload
+    assert "planned outcome" in _document_text(destination)
+    descriptions = [
+        node.get("descr")
+        for node in Document(destination).element.iter(f"{{{WP_NS}}}docPr")
+    ]
+    assert descriptions == [
+        "Group comparison figure showing individual complete-case observations and "
+        "distributions for the planned outcome across planned exposure groups (n = 11)."
+    ]
+
+
+def test_turkish_table_uses_a_nonwrapping_not_applicable_token(
+    tmp_path: Path, report_inputs
+) -> None:
+    """The Turkish not-applicable marker must not split one letter onto a new line."""
+    project, brief, plan, bundle, _figures = report_inputs
+    destination = build_results_docx(
+        project, brief, plan, bundle, [], "tr", tmp_path / "table-tr.docx"
+    )
+    first_result = Document(destination).tables[0].rows[1]
+
+    assert first_result.cells[5].text == "—"
+    assert first_result.cells[6].text == "—"
+    assert "Uygulanamaz" not in "\n".join(
+        cell.text for row in Document(destination).tables[0].rows for cell in row.cells
+    )
 
 
 def test_warning_catalog_localizes_meaning_impact_and_action_without_raw_codes(
