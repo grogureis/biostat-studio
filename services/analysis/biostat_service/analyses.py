@@ -19,7 +19,11 @@ import scipy
 from scipy import stats
 import statsmodels
 import statsmodels.api as sm
-from statsmodels.stats.oneway import anova_oneway
+from statsmodels.stats.oneway import (
+    anova_oneway,
+    confint_effectsize_oneway,
+    effectsize_oneway,
+)
 
 from biostat_service.contracts import (
     AnalysisPlan,
@@ -85,7 +89,7 @@ def runtime_versions() -> dict[str, str]:
 
 
 def _data_fingerprint(frame: pd.DataFrame) -> str:
-    """Hash frame content independently of row presentation order."""
+    """Hash values and scientific dtype metadata independently of row order."""
     if frame.columns.has_duplicates:
         raise AnalysisExecutionError("duplicate_column_names")
     ordered_columns = sorted(frame.columns, key=lambda value: f"{type(value).__name__}:{value!s}")
@@ -98,6 +102,22 @@ def _data_fingerprint(frame: pd.DataFrame) -> str:
     digest.update(str(canonical.shape).encode("utf-8"))
     for column in ordered_columns:
         digest.update(f"{type(column).__name__}:{column!s}\0".encode("utf-8"))
+        series = canonical[column]
+        digest.update(
+            f"dtype:{type(series.dtype).__name__}:{series.dtype!s}\0".encode("utf-8")
+        )
+        if isinstance(series.dtype, pd.CategoricalDtype):
+            digest.update(f"ordered:{series.dtype.ordered}\0".encode("utf-8"))
+            categories = pd.Index(series.dtype.categories)
+            digest.update(
+                f"category_dtype:{categories.dtype!s};count:{len(categories)}\0".encode(
+                    "utf-8"
+                )
+            )
+            category_hashes = pd.util.hash_pandas_object(
+                categories, index=False, categorize=False
+            )
+            digest.update(category_hashes.to_numpy(dtype=np.uint64).tobytes())
     digest.update(np.sort(row_hashes.to_numpy(dtype=np.uint64)).tobytes())
     return digest.hexdigest()
 
@@ -203,6 +223,25 @@ def _provenance(
     )
 
 
+def _validate_finite_payload(value: object, path: str) -> None:
+    """Reject non-finite numeric publication fields at the central boundary."""
+    if value is None or isinstance(value, (str, bytes, bool)):
+        return
+    if isinstance(value, (float, np.floating)):
+        if not np.isfinite(value):
+            raise AnalysisExecutionError(f"non_finite_result:{path}")
+        return
+    if isinstance(value, (int, np.integer)):
+        return
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            _validate_finite_payload(nested, f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple, np.ndarray)):
+        for index, nested in enumerate(value):
+            _validate_finite_payload(nested, f"{path}.{index}")
+
+
 def _result(
     *,
     item: PlanItem,
@@ -218,6 +257,14 @@ def _result(
     transformations: list[str],
     warnings: list[str] | None = None,
 ) -> AnalysisResult:
+    _validate_finite_payload(estimate, "estimate")
+    _validate_finite_payload(p_value, "p_value")
+    if p_value is not None:
+        _p_value(p_value)
+    _validate_finite_payload(interval[0], "confidence_interval.lower")
+    _validate_finite_payload(interval[1], "confidence_interval.upper")
+    _validate_finite_payload(effect_value, "effect_size.value")
+    _validate_finite_payload(diagnostics, "diagnostics")
     return AnalysisResult(
         id=item.id,
         method=item.method,
@@ -244,11 +291,11 @@ def run_descriptive_summary(
     first_estimate: float | None = None
     first_interval: tuple[float | None, float | None] = (None, None)
     for name in variables:
-        series = frame[name]
-        non_missing = series.dropna()
+        series = complete[name]
+        non_missing = series
         summary: dict[str, float | int | str | None] = {
             "non_missing": int(non_missing.shape[0]),
-            "missing": int(series.isna().sum()),
+            "missing": counts["missing"],
             "unique": int(non_missing.nunique(dropna=True)),
         }
         if pd.api.types.is_numeric_dtype(series) and not non_missing.empty:
@@ -440,7 +487,7 @@ def run_paired_t(
         estimate=_safe_float(estimate, "non_finite_estimate"),
         p_value=_p_value(test.pvalue),
         interval=(estimate - critical * standard_error, estimate + critical * standard_error),
-        effect_name="paired_hedges_g",
+        effect_name="paired_hedges_g_z",
         effect_value=_safe_float(hedges_g, "non_finite_effect_size"),
         diagnostics={
             "counts": counts,
@@ -457,8 +504,9 @@ def run_paired_t(
                     "upper": hedges_g + normal_critical * hedges_se,
                 },
                 "formula": (
-                    "J=1-3/(4*n_pairs-5); g=J*mean(difference)/sd(difference); "
-                    "SE(g)=J*sqrt(1/n_pairs+d_z^2/(2*(n_pairs-1)))"
+                    "J=1-3/(4*(n_pairs-1)-1); "
+                    "g_z=J*mean(within_pair_difference)/sd(within_pair_difference); "
+                    "SE(g_z)=J*sqrt(1/n_pairs+d_z^2/(2*(n_pairs-1)))"
                 ),
             },
         },
@@ -488,44 +536,48 @@ def run_welch_anova(
     means = np.asarray([np.mean(group) for group in groups], dtype=float)
     variances = np.asarray([np.var(group, ddof=1) for group in groups], dtype=float)
     sizes = np.asarray([group.size for group in groups], dtype=int)
-    high, low = int(np.argmax(means)), int(np.argmin(means))
-    estimate = float(means[high] - means[low])
-    se = float(np.sqrt(variances[high] / sizes[high] + variances[low] / sizes[low]))
-    df = (variances[high] / sizes[high] + variances[low] / sizes[low]) ** 2 / (
-        (variances[high] / sizes[high]) ** 2 / (sizes[high] - 1)
-        + (variances[low] / sizes[low]) ** 2 / (sizes[low] - 1)
+    estimate = _safe_float(
+        effectsize_oneway(means, variances, sizes, use_var="unequal"),
+        "non_finite_welch_effect_size",
     )
-    critical = float(stats.t.ppf(1 - ALPHA / 2, df))
-    grand_mean = float(np.average(means, weights=sizes))
-    ss_between = float(np.sum(sizes * (means - grand_mean) ** 2))
-    ss_within = float(np.sum((sizes - 1) * variances))
-    mean_square_within = ss_within / (int(np.sum(sizes)) - len(groups))
-    omega_squared = max(
-        0.0,
-        (ss_between - (len(groups) - 1) * mean_square_within)
-        / (ss_between + ss_within + mean_square_within),
+    effect_interval = confint_effectsize_oneway(
+        analysis.statistic,
+        (analysis.df_num, analysis.df_denom),
+        alpha=ALPHA,
+        nobs=int(np.sum(sizes)),
+    ).f2
+    effect_lower = _safe_float(
+        effect_interval[0], "non_finite_welch_effect_confidence_interval"
     )
+    effect_upper = _safe_float(
+        effect_interval[1], "non_finite_welch_effect_confidence_interval"
+    )
+    if effect_lower < 0 or effect_upper < effect_lower:
+        raise AnalysisExecutionError("invalid_welch_effect_confidence_interval")
     return _result(
         item=item,
         context=context,
         n=counts["used"],
-        estimate=_safe_float(estimate, "non_finite_estimate"),
+        estimate=estimate,
         p_value=_p_value(analysis.pvalue),
-        interval=(estimate - critical * se, estimate + critical * se),
-        effect_name="omega_squared",
-        effect_value=_safe_float(omega_squared, "non_finite_effect_size"),
+        interval=(effect_lower, effect_upper),
+        effect_name="welch_cohen_f_squared",
+        effect_value=estimate,
         diagnostics={
             "counts": counts,
             "group_sizes": sizes.tolist(),
-            "test_statistic": _safe_float(analysis.statistic, "non_finite_test_statistic"),
+            "welch_f": _safe_float(analysis.statistic, "non_finite_test_statistic"),
             "degrees_freedom": [
                 _safe_float(analysis.df_num, "non_finite_degrees_freedom"),
                 _safe_float(analysis.df_denom, "non_finite_degrees_freedom"),
             ],
             "exposure_level_order": order_strategy,
-            "effect_size_formula": (
-                "omega_squared=(SS_between-(k-1)*MS_within)/(SS_total+MS_within)"
+            "effect_parameter": "welch_cohen_f_squared",
+            "effect_size_definition": (
+                "statsmodels.effectsize_oneway(means, variances, group_sizes, "
+                "use_var='unequal'); f_squared=noncentrality/total_n"
             ),
+            "confidence_interval_method": "statsmodels_noncentral_f_inversion",
         },
         exclusions=exclusions,
         transformations=["complete_case", "welch_unequal_variance_weights"],

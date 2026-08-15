@@ -175,7 +175,7 @@ def _method_contract(
                 "Check missingness, outcome scale, group distributions, and influential outliers.",
                 "Use the robust alternative only when distribution, outliers, scale, and estimand support it; a normality p-value alone is insufficient.",
             ],
-            "effect": "omega_squared",
+            "effect": "welch_cohen_f_squared",
             "table": "multi_group_comparison",
             "figure": "group_distribution_and_effect",
         },

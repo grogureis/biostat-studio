@@ -183,6 +183,27 @@ def test_every_plan_output_contract_includes_effect_size_ci_table_and_figure() -
         assert any(output.startswith("figure:") for output in item.outputs)
 
 
+def test_welch_anova_contract_names_the_verified_omnibus_effect() -> None:
+    """A pooled omega-squared label would not match unequal-variance execution."""
+    profile = core_profile()
+    profile.variables["treatment_group"] = metadata(
+        "treatment_group", "categorical", unique_values=3
+    )
+    selected_roles = roles()
+    selected_roles["treatment_group"] = VariableRole(
+        name="treatment_group",
+        role="exposure",
+        kind="categorical",
+        confirmed=True,
+    )
+
+    plan = build_plan(brief(), profile, selected_roles)
+
+    assert plan.items[-1].method == "welch_anova"
+    assert "effect_size:welch_cohen_f_squared" in plan.items[-1].outputs
+    assert all("omega_squared" not in output for output in plan.items[-1].outputs)
+
+
 def test_planner_and_audit_share_one_method_identifier_registry() -> None:
     """A planner-only method identifier would be rejected by the audit boundary."""
     plan = build_plan(brief(), core_profile(), roles())
