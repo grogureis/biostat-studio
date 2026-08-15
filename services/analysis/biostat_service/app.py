@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, FastAPI
 from uvicorn import Config, Server
 
-from .security import require_loopback, require_session
+from .security import require_loopback, require_session, session_token
 
 
 API_VERSION = 1
@@ -26,6 +26,7 @@ class ReadinessServer(Server):
 
 def create_app() -> FastAPI:
     """Create the local-only API without exposing interactive documentation."""
+    session_token()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/health", dependencies=[Depends(require_loopback)])
