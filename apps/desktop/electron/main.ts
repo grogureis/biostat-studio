@@ -1,14 +1,24 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { createApplicationLifecycle } from "./lifecycle";
+import { allowsRendererNavigation, requireLocalDevelopmentUrl } from "./renderer-security";
 import { startSidecar, stopSidecar, type SidecarSession } from "./sidecar";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | undefined;
 let sidecarSession: SidecarSession | undefined;
-let quitting = false;
+
+function rendererUrl(): string {
+  const developmentUrl = process.env.VITE_DEV_SERVER_URL;
+  if (developmentUrl) {
+    return requireLocalDevelopmentUrl(developmentUrl).toString();
+  }
+  return pathToFileURL(join(currentDirectory, "../dist/index.html")).toString();
+}
 
 function createWindow(): BrowserWindow {
+  const approvedRenderer = rendererUrl();
   const window = new BrowserWindow({
     width: 1440,
     height: 960,
@@ -22,12 +32,13 @@ function createWindow(): BrowserWindow {
     },
   });
 
-  const developmentUrl = process.env.VITE_DEV_SERVER_URL;
-  if (developmentUrl) {
-    void window.loadURL(developmentUrl);
-  } else {
-    void window.loadFile(join(currentDirectory, "../dist/index.html"));
-  }
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event, target) => {
+    if (!allowsRendererNavigation(target, approvedRenderer)) {
+      event.preventDefault();
+    }
+  });
+  void window.loadURL(approvedRenderer);
 
   return window;
 }
@@ -68,22 +79,35 @@ function registerIpcHandlers(): void {
   });
 }
 
-app.whenReady().then(async () => {
-  try {
+function messageFor(error: unknown): string {
+  return error instanceof Error ? error.message : "Unable to start the local analysis service";
+}
+
+const lifecycle = createApplicationLifecycle({
+  startSidecar: async () => {
     sidecarSession = await startSidecar();
     registerIpcHandlers();
+  },
+  stopSidecar,
+  createWindow: () => {
     mainWindow = createWindow();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to start the local analysis service";
-    dialog.showErrorBox("BioStat Studio could not start", message);
-    app.exit(1);
-  }
+  },
+  getWindowCount: () => BrowserWindow.getAllWindows().length,
+  quit: () => app.quit(),
+  reportShutdownFailure: (error) => {
+    dialog.showErrorBox("BioStat Studio sidecar shutdown failed", messageFor(error));
+  },
+});
+
+app.whenReady().then(() => {
+  void lifecycle.initialize().catch((error) => {
+    dialog.showErrorBox("BioStat Studio could not start", messageFor(error));
+    app.quit();
+  });
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    mainWindow = createWindow();
-  }
+  lifecycle.activate();
 });
 
 app.on("window-all-closed", () => {
@@ -93,13 +117,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-  if (quitting) {
-    return;
-  }
-
-  event.preventDefault();
-  void stopSidecar().finally(() => {
-    quitting = true;
-    app.quit();
-  });
+  void lifecycle.beforeQuit(event);
 });
