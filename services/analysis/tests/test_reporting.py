@@ -1,0 +1,278 @@
+"""Structural and content coverage for publication-ready Word results reports."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import re
+from zipfile import ZipFile
+
+from docx import Document
+from docx.oxml.ns import qn
+import pandas as pd
+import pytest
+
+from biostat_service.analyses import run_plan
+from biostat_service.contracts import AnalysisPlan, PlanItem, StudyBrief
+from biostat_service.projects import LocalProject
+from biostat_service.reporting import build_results_docx, format_p_value
+from biostat_service.visuals import build_figures
+
+
+FIXTURE_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "core-study.xlsx"
+WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+
+def _item(identifier: str, method: str, variables: list[str]) -> PlanItem:
+    return PlanItem(
+        id=identifier,
+        estimand="Confirmed structured estimand.",
+        method=method,
+        rationale="Confirmed structured rationale.",
+        required_variables=variables,
+        assumptions=["Confirmed assumptions."],
+        robust_alternative="mann_whitney_u" if method == "welch_t_test" else None,
+        outputs=["effect_size:required", "confidence_interval:95_percent"],
+    )
+
+
+@pytest.fixture
+def report_inputs(tmp_path: Path):
+    frame = pd.read_excel(FIXTURE_PATH, sheet_name="Analysis")
+    plan = AnalysisPlan(
+        version=3,
+        items=[
+            _item(
+                "descriptive_summary",
+                "descriptive_summary",
+                ["age_years", "treatment_group"],
+            ),
+            _item(
+                "primary_outcome",
+                "welch_t_test",
+                ["age_years", "treatment_group"],
+            ),
+        ],
+        warnings=["review_assumptions"],
+    )
+    brief = StudyBrief(
+        title="Cardiovascular outcomes",
+        question="Is treatment associated with age at the measured endpoint?",
+        hypothesis="The exposure groups differ at the measured endpoint.",
+        design="cohort",
+        outcome_variables=["age_years"],
+        exposure_variables=["treatment_group"],
+        language="en",
+    )
+    bundle = run_plan(frame, plan)
+    figures = build_figures(frame, plan, bundle, tmp_path / "figures", "en")
+    return LocalProject(tmp_path / "cardio.biostat"), brief, plan, bundle, figures
+
+
+@pytest.fixture
+def report_en(tmp_path: Path, report_inputs) -> Path:
+    project, brief, plan, bundle, figures = report_inputs
+    return build_results_docx(
+        project,
+        brief,
+        plan,
+        bundle,
+        figures,
+        "en",
+        tmp_path / "results-en.docx",
+    )
+
+
+def _style_properties(document: Document, style_name: str) -> dict[str, str | None]:
+    style = document.styles[style_name]
+    paragraph_properties = style._element.pPr
+    run_properties = style._element.rPr
+    spacing = paragraph_properties.find(qn("w:spacing"))
+    color = run_properties.find(qn("w:color"))
+    size = run_properties.find(qn("w:sz"))
+    fonts = run_properties.find(qn("w:rFonts"))
+    return {
+        "before": spacing.get(qn("w:before")) if spacing is not None else None,
+        "after": spacing.get(qn("w:after")) if spacing is not None else None,
+        "line": spacing.get(qn("w:line")) if spacing is not None else None,
+        "color": color.get(qn("w:val")) if color is not None else None,
+        "size": size.get(qn("w:val")) if size is not None else None,
+        "font": fonts.get(qn("w:ascii")) if fonts is not None else None,
+    }
+
+
+def test_results_docx_contains_required_sections_and_scientific_details(
+    report_en: Path,
+) -> None:
+    """Dropping a required result field would produce an incomplete manuscript section."""
+    document = Document(report_en)
+    text = "\n".join(node.text or "" for node in document.element.iter(qn("w:t")))
+
+    assert document.paragraphs[0].style.name == "Heading 1"
+    assert document.paragraphs[0].text == "Results"
+    assert "95% CI" in text
+    assert "Table 1" in text
+    assert "Figure 1" in text
+    assert "n = 11" in text
+    assert "missing = 1" in text
+    assert "p = 0.068" in text
+    assert "p < 0.001" not in text
+    assert "Hedges' g = -1.138" in text
+    assert "Reproducibility" in text
+    assert "Plan version: 3" in text
+    assert len(document.tables) >= 1
+    assert len(document.inline_shapes) == 1
+
+
+def test_results_docx_uses_exact_manuscript_style_and_table_geometry(
+    report_en: Path,
+) -> None:
+    """Renderer defaults or autofit would make journal geometry unstable across Word builds."""
+    document = Document(report_en)
+    section = document.sections[0]
+
+    assert section.page_width.twips == 12240
+    assert section.page_height.twips == 15840
+    assert section.top_margin.twips == 1440
+    assert section.right_margin.twips == 1440
+    assert section.bottom_margin.twips == 1440
+    assert section.left_margin.twips == 1440
+    assert section.header_distance.twips == 708
+    assert section.footer_distance.twips == 708
+    assert not section.header.paragraphs[0].text
+    assert not section.footer.paragraphs[0].text
+
+    assert _style_properties(document, "Normal") == {
+        "before": "0",
+        "after": "120",
+        "line": "264",
+        "color": "000000",
+        "size": "22",
+        "font": "Calibri",
+    }
+    assert _style_properties(document, "Heading 1") == {
+        "before": "320",
+        "after": "160",
+        "line": "264",
+        "color": "183D3A",
+        "size": "32",
+        "font": "Calibri",
+    }
+    assert _style_properties(document, "Heading 2") == {
+        "before": "240",
+        "after": "120",
+        "line": "264",
+        "color": "183D3A",
+        "size": "26",
+        "font": "Calibri",
+    }
+    assert _style_properties(document, "Heading 3") == {
+        "before": "160",
+        "after": "80",
+        "line": "264",
+        "color": "2F635B",
+        "size": "24",
+        "font": "Calibri",
+    }
+
+    table = document.tables[0]
+    properties = table._tbl.tblPr
+    table_width = properties.find(qn("w:tblW"))
+    table_indent = properties.find(qn("w:tblInd"))
+    table_layout = properties.find(qn("w:tblLayout"))
+    assert table_width.get(qn("w:type")) == "dxa"
+    assert table_width.get(qn("w:w")) == "9360"
+    assert table_indent.get(qn("w:type")) == "dxa"
+    assert table_indent.get(qn("w:w")) == "120"
+    assert table_layout.get(qn("w:type")) == "fixed"
+    widths = [int(column.get(qn("w:w"))) for column in table._tbl.tblGrid.gridCol_lst]
+    assert sum(widths) == 9360
+    for row in table.rows:
+        assert row.height is None
+        assert [cell.width.twips for cell in row.cells] == widths
+    assert table.rows[0]._tr.get_or_add_trPr().find(qn("w:tblHeader")) is not None
+    cell_margins = properties.find(qn("w:tblCellMar"))
+    assert {
+        child.tag.rsplit("}", 1)[-1]: child.get(qn("w:w")) for child in cell_margins
+    } == {"top": "80", "bottom": "80", "start": "120", "end": "120"}
+
+
+def test_results_docx_preserves_source_caption_alt_text_and_neutral_metadata(
+    report_en: Path, report_inputs
+) -> None:
+    """Losing source accessibility text or leaking machine metadata would make export unsafe."""
+    _project, _brief, _plan, _bundle, figures = report_inputs
+    document = Document(report_en)
+    visible_text = "\n".join(node.text or "" for node in document.element.iter(qn("w:t")))
+    descriptions = [
+        node.get("descr")
+        for node in document.element.iter(f"{{{WP_NS}}}docPr")
+    ]
+
+    assert figures[0].caption in visible_text
+    assert descriptions == [figures[0].alt_text]
+    assert document.core_properties.author == "BioStat Studio"
+    assert document.core_properties.last_modified_by == "BioStat Studio"
+
+    with ZipFile(report_en) as archive:
+        payload = "\n".join(
+            archive.read(name).decode("utf-8", errors="ignore")
+            for name in ("word/document.xml", "docProps/core.xml", "word/_rels/document.xml.rels")
+        )
+    assert "P001" not in payload
+    assert str(FIXTURE_PATH) not in payload
+    assert "/Users/" not in payload
+    assert not re.search(r"(?i)\b(?:todo|tbd|placeholder)\b|\{\{", payload)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [(0.0009, "p < 0.001"), (0.001, "p = 0.001"), (0.068026, "p = 0.068")],
+)
+def test_p_value_formatting_uses_exact_values_unless_below_threshold(
+    value: float, expected: str
+) -> None:
+    """Rounding a small exact p-value to zero would overstate the result."""
+    assert format_p_value(value) == expected
+
+
+def test_paired_report_uses_pairs_as_the_analysis_denominator(tmp_path: Path) -> None:
+    """Reporting paired rows instead of complete pairs would double the scientific n."""
+    frame = pd.DataFrame(
+        {
+            "pair_id": ["p1", "p1", "p2", "p2", "p3", "p3"],
+            "condition": pd.Categorical(
+                ["after", "before"] * 3,
+                categories=["after", "before"],
+                ordered=True,
+            ),
+            "score": [8.0, 5.0, 7.0, 6.0, float("nan"), 4.0],
+        }
+    )
+    item = _item("primary_outcome", "paired_t_test", ["score", "condition", "pair_id"])
+    plan = AnalysisPlan(items=[item])
+    bundle = run_plan(frame, plan)
+    brief = StudyBrief(
+        title="Paired outcomes",
+        question="Are paired outcome measurements associated with condition?",
+        hypothesis="Paired outcome measurements differ by condition.",
+        design="repeated",
+        outcome_variables=["score"],
+        exposure_variables=["condition"],
+        pair_id_variable="pair_id",
+    )
+
+    destination = build_results_docx(
+        LocalProject(tmp_path / "paired.biostat"),
+        brief,
+        plan,
+        bundle,
+        [],
+        "en",
+        tmp_path / "paired.docx",
+    )
+    text = "\n".join(
+        node.text or "" for node in Document(destination).element.iter(qn("w:t"))
+    )
+
+    assert "n = 2 analysis units" in text
+    assert "n = 4 analysis units" not in text
