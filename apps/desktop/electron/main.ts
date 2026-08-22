@@ -1,10 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
-import { createApplicationLifecycle } from "./lifecycle";
-import { allowsRendererNavigation, requireLocalDevelopmentUrl } from "./renderer-security";
-import { startSidecar, stopSidecar, type SidecarSession } from "./sidecar";
-import { createAuthenticatedApiProxy } from "./api-proxy";
+import { createApplicationLifecycle } from "./lifecycle.js";
+import { allowsRendererNavigation, requireLocalDevelopmentUrl } from "./renderer-security.js";
+import { startSidecar, stopSidecar, type SidecarSession } from "./sidecar.js";
+import { createAuthenticatedApiProxy } from "./api-proxy.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | undefined;

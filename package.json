@@ -10,6 +10,6 @@
     "test:python": "services/analysis/.venv/bin/python -m pytest services/analysis/tests",
     "test:desktop": "npm run test --workspace apps/desktop",
     "dev": "npm run dev --workspace apps/desktop",
-    "package:mac": "npm run package:mac --workspace apps/desktop"
+    "package:mac": "bash scripts/package-macos.sh"
   }
 }

@@ -1,5 +1,5 @@
-import type { ApiRequest, ApiResponse } from "./bridge";
-import type { SidecarSession } from "./sidecar";
+import type { ApiRequest, ApiResponse } from "./bridge.js";
+import type { SidecarSession } from "./sidecar.js";
 
 type Request = (input: string, init: RequestInit) => Promise<Response>;
 type SessionProvider = () => SidecarSession;

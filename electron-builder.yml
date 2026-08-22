@@ -1,0 +1,27 @@
+appId: com.biostatstudio.app
+productName: BioStat Studio
+asar: true
+directories:
+  app: apps/desktop
+  output: release
+  buildResources: apps/desktop/build
+files:
+  - dist/**
+  - electron-dist/**
+  - package.json
+extraResources:
+  - from: services/analysis/dist/biostat-service
+    to: bin
+mac:
+  category: public.app-category.developer-tools
+  icon: apps/desktop/build/icon.icns
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: dir
+      arch:
+        - arm64
+dmg:
+  artifactName: ${productName}-${version}-arm64.${ext}
