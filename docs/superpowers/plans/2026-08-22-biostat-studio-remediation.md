@@ -112,11 +112,11 @@
 - Consumes: `model_fit_failure`, `model_convergence_failure`, and `library_warning` emitted by `analyses.py`.
 - Produces: privacy-safe diagnostic categories/codes without exception text or data values.
 
-- [ ] Add parameterized job tests using the three real producer codes and literal expected safe categories.
-- [ ] Run to observe RED because the allowlist currently recognizes different names.
-- [ ] Extend the allowlist to the actual producer vocabulary while retaining compatibility for existing safe codes.
-- [ ] Add one integration assertion using an `AnalysisExecutionError` shaped exactly like `analyses.py` output.
-- [ ] Run jobs and reference-analysis suites.
+- [x] Add parameterized job tests using the three real producer codes and literal expected safe categories.
+- [x] Run to observe RED because the allowlist currently recognizes different names.
+- [x] Extend the allowlist to the actual producer vocabulary while retaining compatibility for existing safe codes.
+- [x] Add one integration assertion using the real logistic failure emitted by `analyses.py`.
+- [x] Run jobs and reference-analysis suites.
 
 ### Task 6: Use canonical Excel column identifiers during execution
 

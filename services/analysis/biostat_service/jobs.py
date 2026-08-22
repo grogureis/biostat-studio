@@ -66,6 +66,9 @@ _DIAGNOSTIC_CATEGORIES = {
     "convergence_warning": "convergence",
     "singular_matrix": "estimation",
     "non_finite_estimate": "numeric",
+    "model_fit_failure": "separation",
+    "model_convergence_failure": "convergence",
+    "library_warning": "library",
 }
 
 
