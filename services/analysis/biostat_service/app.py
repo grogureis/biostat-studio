@@ -355,6 +355,29 @@ def _validated_roles(
     return roles
 
 
+def _apply_approved_kinds(
+    frame: pd.DataFrame, context: ProjectContext
+) -> pd.DataFrame:
+    if context.approved_roles is None:
+        return frame
+    converted = frame.copy()
+    for name, role in context.approved_roles.items():
+        if role.role in {"none", "exclude", "pair_id"}:
+            continue
+        metadata = context.profile.variables[name]
+        if role.kind == metadata.kind:
+            continue
+        if name not in converted.columns:
+            raise ValueError("approved_variable_missing")
+        if role.kind == "continuous":
+            converted[name] = pd.to_numeric(converted[name], errors="coerce")
+        elif role.kind in {"binary", "categorical"}:
+            converted[name] = converted[name].astype("string")
+        else:
+            raise ValueError("unsupported_approved_kind")
+    return converted
+
+
 def _read_frame(context: ProjectContext) -> pd.DataFrame:
     """Read fresh source bytes and reject modification after profiling."""
     source = context.profile.source_path
@@ -364,7 +387,7 @@ def _read_frame(context: ProjectContext) -> pd.DataFrame:
     frame = pd.read_excel(source, sheet_name=context.profile.selected_sheet)
     if sha256(source.read_bytes()).hexdigest() != before:
         raise ValueError("source_file_changed")
-    return frame
+    return _apply_approved_kinds(frame, context)
 
 
 def _get_context(projects: dict[UUID, ProjectContext], project_id: UUID) -> ProjectContext:

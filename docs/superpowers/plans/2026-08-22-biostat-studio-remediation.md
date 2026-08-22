@@ -74,13 +74,13 @@
 - Consumes: complete confirmed `dict[str, VariableRole]` and the canonical analysis frame.
 - Produces: planner decisions based on `VariableRole.kind` plus deterministic, value-free coercion before execution.
 
-- [ ] Add a planner test where inferred `categorical` metadata is explicitly approved as `continuous`; assert the plan uses the approved scientific kind instead of emitting `*_kind_mismatch`.
-- [ ] Run it to observe RED in `_validate_role()`.
-- [ ] Replace the inferred-kind equality gate with an approved-kind allowlist gate; append a value-free plan warning when the approved and inferred kinds differ.
-- [ ] Add service tests for continuous coercion (numeric strings become numeric; non-numeric values become missing and are reflected by existing missing-data handling) and categorical coercion that preserves missingness.
-- [ ] Run them to observe RED because `_read_frame()` returns untransformed values.
-- [ ] Add one deterministic `_apply_approved_kinds(frame, roles)` boundary and call it only after fingerprint/header validation. Fail closed for unsupported/date conversions rather than guessing.
-- [ ] Run planner, service-security, and reference-analysis suites.
+- [x] Add a planner test where inferred `categorical` metadata is explicitly approved as `continuous`; assert the plan uses the approved scientific kind instead of emitting `*_kind_mismatch`.
+- [x] Run it to observe RED in `_validate_role()`.
+- [x] Replace the inferred-kind equality gate with an approved-kind allowlist gate; append a value-free plan warning when the approved and inferred kinds differ.
+- [x] Add service tests for continuous coercion (numeric strings become numeric; non-numeric values become missing and are reflected by existing missing-data handling) and categorical coercion that preserves missingness.
+- [x] Run them to observe RED because `_read_frame()` returns untransformed values.
+- [x] Add one deterministic `_apply_approved_kinds(frame, roles)` boundary and call it only after fingerprint/header validation. Fail closed for unsupported/date conversions rather than guessing.
+- [x] Run planner, service-security, and reference-analysis suites.
 
 ### Task 4: Return authoritative cancellation outcomes to the UI
 

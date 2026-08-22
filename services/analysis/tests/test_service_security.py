@@ -11,8 +11,9 @@ from uuid import UUID
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+import pandas as pd
 
-from biostat_service.app import create_app
+from biostat_service.app import _apply_approved_kinds, create_app
 
 
 @pytest.fixture
@@ -760,6 +761,97 @@ def test_project_open_rejects_tampered_persisted_analysis_state(
 
     assert opened.status_code == 422
     assert opened.json() == {"detail": "project_open_failed"}
+
+
+def test_approved_continuous_kind_coerces_mixed_values_and_reports_missingness(
+    client, tmp_path: Path
+) -> None:
+    workbook_path = tmp_path / "mixed-outcome.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    for index in range(12):
+        outcome = "not-recorded" if index == 2 else index + 1
+        workbook.active.append(
+            ["control" if index < 6 else "treated", outcome]
+        )
+    workbook.save(workbook_path)
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {
+        "title": "Approved coercion",
+        "question": "Is the outcome different between groups?",
+        "hypothesis": "The groups have different outcomes.",
+        "design": "cohort",
+        "outcome_variables": ["outcome"],
+        "exposure_variables": ["group"],
+    }
+    created = client.post(
+        "/v1/projects",
+        headers=headers,
+        json={
+            "source_path": str(workbook_path),
+            "project_root": str(tmp_path / "mixed-outcome.biostat"),
+            "brief": brief,
+        },
+    ).json()
+    roles = _approved_roles(created)
+    next(role for role in roles if role["name"] == "outcome")["kind"] = "continuous"
+    project_id = created["id"]
+
+    assert client.post(
+        f"/v1/projects/{project_id}/data-approval",
+        headers=headers,
+        json={"roles": roles},
+    ).status_code == 200
+    plan = client.post(
+        "/v1/plans", headers=headers, json={"project_id": project_id}
+    ).json()
+    assert plan["blocking_errors"] == []
+    assert "approved_kind_override:outcome:categorical:continuous" in plan["warnings"]
+    assert client.post(
+        "/v1/plans/approval",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "revision": plan["revision"],
+            "digest": plan["digest"],
+        },
+    ).status_code == 200
+    queued = client.post(
+        "/v1/jobs",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "approved_plan_revision": plan["revision"],
+            "approved_plan_digest": plan["digest"],
+        },
+    ).json()
+    terminal = client.app.state.job_manager.wait(UUID(queued["id"]), timeout=5)
+
+    assert terminal.status == "completed"
+    primary = next(
+        result for result in terminal.result["results"] if result["id"] == "primary_outcome"
+    )
+    assert primary["n"] == 11
+    assert primary["diagnostics"]["counts"] == {"input": 12, "used": 11, "missing": 1}
+    assert "approved_kind_override:outcome:categorical:continuous" in primary["warnings"]
+
+
+def test_approved_categorical_kind_preserves_missingness_during_coercion() -> None:
+    frame = pd.DataFrame({"mixed_group": [1, "A", None]})
+    context = SimpleNamespace(
+        approved_roles={
+            "mixed_group": SimpleNamespace(role="exposure", kind="categorical")
+        },
+        profile=SimpleNamespace(
+            variables={"mixed_group": SimpleNamespace(kind="binary")}
+        ),
+    )
+
+    converted = _apply_approved_kinds(frame, context)
+
+    assert converted["mixed_group"].dropna().tolist() == ["1", "A"]
+    assert int(converted["mixed_group"].isna().sum()) == 1
+    assert str(converted["mixed_group"].dtype) == "string"
 
 
 def test_v1_rejects_non_loopback_client(monkeypatch):

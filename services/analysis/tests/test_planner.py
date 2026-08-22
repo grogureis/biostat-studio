@@ -172,6 +172,21 @@ def test_core_plan_matches_value_free_deterministic_snapshot() -> None:
     ]
 
 
+def test_confirmed_kind_override_drives_planning_and_is_recorded() -> None:
+    """Rejecting an explicit kind correction leaves mixed-type columns impossible to resolve."""
+    profile = core_profile()
+    profile.variables["age_years"] = metadata(
+        "age_years", "categorical", unique_values=10, non_missing=10, missing=2
+    )
+    selected_roles = roles(outcome_kind="continuous")
+
+    plan = build_plan(brief(), profile, selected_roles)
+
+    assert plan.blocking_errors == []
+    assert plan.items[-1].method == "welch_t_test"
+    assert "approved_kind_override:age_years:categorical:continuous" in plan.warnings
+
+
 def test_every_plan_output_contract_includes_effect_size_ci_table_and_figure() -> None:
     """Dropping uncertainty or a required artifact would produce incomplete reporting."""
     plan = build_plan(brief(), core_profile(), roles())

@@ -45,6 +45,20 @@ def _profile_warnings(profile: DataProfile) -> list[str]:
     ]
 
 
+def _approved_kind_warnings(
+    profile: DataProfile, roles: dict[str, VariableRole]
+) -> list[str]:
+    return [
+        f"approved_kind_override:{name}:{metadata.kind}:{selected.kind}"
+        for name, metadata in profile.variables.items()
+        if (selected := roles.get(name)) is not None
+        and selected.confirmed
+        and selected.role in {"outcome", "exposure", "covariate"}
+        and selected.kind in ANALYTIC_KINDS
+        and selected.kind != metadata.kind
+    ]
+
+
 def _validate_role(
     variable: str,
     expected_role: str,
@@ -60,8 +74,6 @@ def _validate_role(
         return None, f"unconfirmed_{expected_role}:{variable}"
     if selected.name != variable or selected.role != expected_role:
         return None, f"invalid_{expected_role}_role:{variable}"
-    if selected.kind != metadata.kind:
-        return None, f"{expected_role}_kind_mismatch:{variable}"
     if selected.kind not in ANALYTIC_KINDS:
         return None, f"unsupported_{expected_role}_kind:{variable}"
     return selected.kind, None
@@ -338,7 +350,7 @@ def build_plan(
     roles: dict[str, VariableRole],
 ) -> AnalysisPlan:
     """Build a versioned plan without inferring methods from free text."""
-    warnings = _profile_warnings(profile)
+    warnings = _profile_warnings(profile) + _approved_kind_warnings(profile, roles)
     blocking_errors: list[str] = []
 
     if brief.design not in SUPPORTED_STUDY_DESIGNS:
