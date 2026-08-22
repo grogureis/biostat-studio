@@ -239,11 +239,11 @@ def test_blocking_and_unverified_selected_methods_fail_before_execution(
     with pytest.raises(AnalysisExecutionError, match="plan_has_blocking_errors"):
         run_plan(core_frame, AnalysisPlan(blocking_errors=["unconfirmed_outcome"]),)
 
-    alternative = AnalysisPlan(
-        items=[item("primary_outcome", "mann_whitney_u", ["age_years", "treatment_group"])]
+    unknown_method = AnalysisPlan(
+        items=[item("primary_outcome", "invented_method", ["age_years", "treatment_group"])]
     )
-    with pytest.raises(AnalysisExecutionError, match="unverified_selected_method:mann_whitney_u"):
-        run_plan(core_frame, alternative)
+    with pytest.raises(AnalysisExecutionError, match="unknown_selected_method:invented_method"):
+        run_plan(core_frame, unknown_method)
 
     unknown_alternative = AnalysisPlan(
         items=[
@@ -258,8 +258,255 @@ def test_blocking_and_unverified_selected_methods_fail_before_execution(
     with pytest.raises(AnalysisExecutionError, match="unknown_robust_alternative"):
         run_plan(core_frame, unknown_alternative)
 
-    assert "mann_whitney_u" in ALTERNATIVE_METADATA_ONLY
-    assert "mann_whitney_u" not in METHODS
+    assert not ALTERNATIVE_METADATA_ONLY
+    for method in ("mann_whitney_u", "wilcoxon_signed_rank", "kruskal_wallis", "spearman_rank"):
+        assert method in METHODS
+
+
+def mann_whitney_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "score": [1.1, 2.3, 2.9, 3.6, 4.5, 5.1, 0.8, 1.4, 1.9, 2.2, 2.5],
+            "arm": ["B"] * 6 + ["A"] * 5,
+        }
+    )
+
+
+def test_mann_whitney_matches_independent_reference() -> None:
+    """Rank-sum wiring, shift estimate, CI, and effect direction must match the reference."""
+    plan = AnalysisPlan(items=[item("primary_outcome", "mann_whitney_u", ["score", "arm"])])
+
+    result = run_plan(mann_whitney_frame(), plan).results["primary_outcome"]
+
+    assert result.method == "mann_whitney_u"
+    assert result.n == 11
+    assert result.estimate == pytest.approx(1.5)
+    assert result.p_value == pytest.approx(0.08225108225108226)
+    assert result.confidence_interval.lower == pytest.approx(-0.3)
+    assert result.confidence_interval.upper == pytest.approx(3.2)
+    assert result.effect_size.name == "rank_biserial_r"
+    assert result.effect_size.value == pytest.approx(0.6666666666666667)
+    assert result.diagnostics["counts"] == {"input": 11, "used": 11, "missing": 0}
+    assert result.diagnostics["group_sizes"] == [6, 5]
+    assert result.diagnostics["u_statistic"] == pytest.approx(25.0)
+    assert result.diagnostics["p_value_method"] == "exact"
+    assert result.diagnostics["estimate_direction"] == (
+        "first_ordered_exposure_level_minus_second_ordered_exposure_level"
+    )
+    assert result.diagnostics["confidence_interval_method"] == (
+        "hodges_lehmann_order_statistic_normal_approximation"
+    )
+
+
+def test_mann_whitney_uses_asymptotic_method_when_values_tie() -> None:
+    """Tied pooled values must switch the exact p-value path off deterministically."""
+    frame = mann_whitney_frame()
+    frame.loc[6, "score"] = 1.1
+    plan = AnalysisPlan(items=[item("primary_outcome", "mann_whitney_u", ["score", "arm"])])
+
+    result = run_plan(frame, plan).results["primary_outcome"]
+
+    assert result.diagnostics["p_value_method"] == "asymptotic"
+    assert result.p_value is not None and 0.0 <= result.p_value <= 1.0
+
+
+def test_mann_whitney_rejects_degenerate_groups() -> None:
+    """One-observation groups or a constant outcome cannot support the test."""
+    tiny = pd.DataFrame({"score": [1.0, 2.0, 3.0], "arm": ["B", "B", "A"]})
+    plan = AnalysisPlan(items=[item("primary_outcome", "mann_whitney_u", ["score", "arm"])])
+    with pytest.raises(AnalysisExecutionError, match="insufficient_group_observations"):
+        run_plan(tiny, plan)
+
+    constant = pd.DataFrame({"score": [2.0] * 6, "arm": ["B", "B", "B", "A", "A", "A"]})
+    with pytest.raises(AnalysisExecutionError, match="insufficient_variation"):
+        run_plan(constant, plan)
+
+
+def wilcoxon_frame(post_scores: list[float]) -> pd.DataFrame:
+    pre_scores = [12.0, 11.2, 14.5, 9.0, 13.0, 10.5, 12.4, 11.5, 15.0]
+    pairs = [f"p{index}" for index in range(1, 10)]
+    return pd.DataFrame(
+        {
+            "pair_id": pairs * 2,
+            "condition": ["pre"] * 9 + ["post"] * 9,
+            "score": pre_scores + post_scores,
+        }
+    )
+
+
+def test_wilcoxon_signed_rank_matches_independent_reference() -> None:
+    """Signed-rank wiring, pseudomedian, CI, and effect must match the reference."""
+    frame = wilcoxon_frame([10.1, 11.9, 12.1, 8.6, 10.4, 10.0, 11.0, 10.0, 12.2])
+    plan = AnalysisPlan(
+        items=[item("primary_outcome", "wilcoxon_signed_rank", ["score", "condition", "pair_id"])]
+    )
+
+    result = run_plan(frame, plan).results["primary_outcome"]
+
+    assert result.method == "wilcoxon_signed_rank"
+    assert result.n == 9
+    assert result.estimate == pytest.approx(1.5)
+    assert result.p_value == pytest.approx(0.01953125)
+    assert result.confidence_interval.lower == pytest.approx(0.4)
+    assert result.confidence_interval.upper == pytest.approx(2.4)
+    assert result.effect_size.name == "matched_rank_biserial_r"
+    assert result.effect_size.value == pytest.approx(0.8666666666666667)
+    assert result.diagnostics["pairs"] == 9
+    assert result.diagnostics["pairs_used_for_test"] == 9
+    assert result.diagnostics["zero_differences_dropped"] == 0
+    assert result.diagnostics["w_statistic"] == pytest.approx(3.0)
+    assert result.diagnostics["p_value_method"] == "exact"
+    assert result.diagnostics["estimate_direction"] == (
+        "first_ordered_exposure_level_minus_second_ordered_exposure_level"
+    )
+    assert "zero_differences_dropped" not in result.warnings
+
+
+def test_wilcoxon_drops_zero_differences_with_a_warning() -> None:
+    """Zero within-pair differences must be excluded, counted, and flagged."""
+    frame = wilcoxon_frame([10.0, 11.2, 12.0, 8.5, 10.5, 10.0, 11.0, 10.0, 12.5])
+    plan = AnalysisPlan(
+        items=[item("primary_outcome", "wilcoxon_signed_rank", ["score", "condition", "pair_id"])]
+    )
+
+    result = run_plan(frame, plan).results["primary_outcome"]
+
+    assert result.n == 9
+    assert result.diagnostics["pairs_used_for_test"] == 8
+    assert result.diagnostics["zero_differences_dropped"] == 1
+    assert result.diagnostics["p_value_method"] == "approx"
+    assert result.p_value == pytest.approx(0.013676686898827124)
+    assert result.estimate == pytest.approx(1.6)
+    assert result.confidence_interval.lower == pytest.approx(0.95)
+    assert result.confidence_interval.upper == pytest.approx(2.5)
+    assert result.effect_size.value == pytest.approx(1.0)
+    assert "zero_differences_dropped" in result.warnings
+
+
+def test_wilcoxon_rejects_all_zero_differences() -> None:
+    """Identical paired measurements cannot support a signed-rank test."""
+    frame = wilcoxon_frame([12.0, 11.2, 14.5, 9.0, 13.0, 10.5, 12.4, 11.5, 15.0])
+    plan = AnalysisPlan(
+        items=[item("primary_outcome", "wilcoxon_signed_rank", ["score", "condition", "pair_id"])]
+    )
+
+    with pytest.raises(AnalysisExecutionError, match="insufficient_variation"):
+        run_plan(frame, plan)
+
+
+def kruskal_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "score": [
+                7.1, 8.4, 9.2, 6.8, 7.7,
+                5.9, 6.3, 7.0, 6.1,
+                4.2, 5.1, 4.8, 5.5, 4.9,
+            ],
+            "site": ["C"] * 5 + ["B"] * 4 + ["A"] * 5,
+        }
+    )
+
+
+def test_kruskal_wallis_matches_independent_reference() -> None:
+    """Omnibus H, epsilon-squared, and the Dunn/Holm table must match the reference."""
+    plan = AnalysisPlan(items=[item("primary_outcome", "kruskal_wallis", ["score", "site"])])
+
+    result = run_plan(kruskal_frame(), plan).results["primary_outcome"]
+
+    assert result.method == "kruskal_wallis"
+    assert result.n == 14
+    assert result.estimate == pytest.approx(0.8257142857142857)
+    assert result.p_value == pytest.approx(0.003920921519003687)
+    assert result.confidence_interval.lower is None
+    assert result.confidence_interval.upper is None
+    assert result.effect_size.name == "rank_epsilon_squared"
+    assert result.effect_size.value == pytest.approx(0.8257142857142857)
+    assert result.diagnostics["h_statistic"] == pytest.approx(11.082857142857144)
+    assert result.diagnostics["degrees_freedom"] == 2
+    assert result.diagnostics["group_sizes"] == [5, 4, 5]
+    posthoc = result.diagnostics["posthoc"]
+    assert posthoc["method"] == "dunn"
+    assert posthoc["adjustment"] == "holm"
+    comparisons = posthoc["comparisons"]
+    assert [(entry["first"], entry["second"]) for entry in comparisons] == [
+        ("C", "B"),
+        ("C", "A"),
+        ("B", "A"),
+    ]
+    assert comparisons[0]["z"] == pytest.approx(1.4432107063270918)
+    assert comparisons[0]["p_value"] == pytest.approx(0.1489611244738834)
+    assert comparisons[0]["p_adjusted"] == pytest.approx(0.18104248921069596)
+    assert comparisons[1]["z"] == pytest.approx(3.3260873624811995)
+    assert comparisons[1]["p_value"] == pytest.approx(0.0008807431907417271)
+    assert comparisons[1]["p_adjusted"] == pytest.approx(0.0026422295722251813)
+    assert comparisons[2]["z"] == pytest.approx(1.692654532112021)
+    assert comparisons[2]["p_value"] == pytest.approx(0.09052124460534798)
+    assert comparisons[2]["p_adjusted"] == pytest.approx(0.18104248921069596)
+    assert comparisons[1]["rank_mean_difference"] == pytest.approx(8.8)
+    assert "posthoc_with_nonsignificant_omnibus" not in result.warnings
+
+
+def test_kruskal_flags_posthoc_when_omnibus_is_not_significant() -> None:
+    """Pairwise contrasts after a null omnibus must carry an explicit caution."""
+    frame = pd.DataFrame(
+        {
+            "score": [1.0, 2.0, 3.0, 1.5, 2.5, 3.5, 1.2, 2.2, 3.2],
+            "site": ["C", "C", "C", "B", "B", "B", "A", "A", "A"],
+        }
+    )
+    plan = AnalysisPlan(items=[item("primary_outcome", "kruskal_wallis", ["score", "site"])])
+
+    result = run_plan(frame, plan).results["primary_outcome"]
+
+    assert result.p_value is not None and result.p_value >= 0.05
+    assert "posthoc_with_nonsignificant_omnibus" in result.warnings
+
+
+def test_kruskal_rejects_constant_outcome() -> None:
+    """A constant outcome across all groups cannot support a rank test."""
+    frame = pd.DataFrame(
+        {"score": [3.0] * 9, "site": ["C", "C", "C", "B", "B", "B", "A", "A", "A"]}
+    )
+    plan = AnalysisPlan(items=[item("primary_outcome", "kruskal_wallis", ["score", "site"])])
+
+    with pytest.raises(AnalysisExecutionError, match="insufficient_variation"):
+        run_plan(frame, plan)
+
+
+def test_spearman_matches_independent_reference() -> None:
+    """Rank correlation, p-value, and the Fieller-based CI must match the reference."""
+    frame = pd.DataFrame(
+        {
+            "y": [2.1, 1.8, 3.5, 3.9, 5.2, 4.8, 6.9, 7.4],
+            "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    plan = AnalysisPlan(items=[item("primary_outcome", "spearman_rank", ["y", "x"])])
+
+    result = run_plan(frame, plan).results["primary_outcome"]
+
+    assert result.method == "spearman_rank"
+    assert result.n == 8
+    assert result.estimate == pytest.approx(0.9523809523809524)
+    assert result.p_value == pytest.approx(0.00026040002438725105)
+    assert result.confidence_interval.lower == pytest.approx(0.741574098598738)
+    assert result.confidence_interval.upper == pytest.approx(0.9920139764772767)
+    assert result.effect_size.name == "spearman_rho"
+    assert result.effect_size.value == pytest.approx(result.estimate)
+    assert result.diagnostics["selected_test"] == "spearman"
+    assert result.diagnostics["confidence_interval_method"] == "fisher_z_fieller_se"
+
+
+def test_spearman_requires_minimum_observations_and_variation() -> None:
+    """Tiny or constant samples cannot support an interpretable rank correlation."""
+    plan = AnalysisPlan(items=[item("primary_outcome", "spearman_rank", ["y", "x"])])
+    tiny = pd.DataFrame({"y": [1.0, 2.0, 3.0], "x": [1.0, 2.0, 3.0]})
+    with pytest.raises(AnalysisExecutionError, match="insufficient_correlation_observations"):
+        run_plan(tiny, plan)
+
+    constant = pd.DataFrame({"y": [1.0, 1.0, 1.0, 1.0], "x": [1.0, 2.0, 3.0, 4.0]})
+    with pytest.raises(AnalysisExecutionError, match="insufficient_variation"):
+        run_plan(constant, plan)
 
 
 def test_paired_execution_requires_one_observation_per_condition_per_pair() -> None:

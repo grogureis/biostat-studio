@@ -19,6 +19,7 @@ import scipy
 from scipy import stats
 import statsmodels
 import statsmodels.api as sm
+from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.oneway import (
     anova_oneway,
     confint_effectsize_oneway,
@@ -37,9 +38,9 @@ from biostat_service.contracts import (
 
 CONFIDENCE_LEVEL = 0.95
 ALPHA = 1.0 - CONFIDENCE_LEVEL
-ALTERNATIVE_METADATA_ONLY = frozenset(
-    {"mann_whitney_u", "wilcoxon_signed_rank", "kruskal_wallis"}
-)
+# Methods that may appear as documented alternatives without a verified executor.
+# Every previously listed rank-based alternative now has a verified executor.
+ALTERNATIVE_METADATA_ONLY: frozenset[str] = frozenset()
 
 
 class AnalysisExecutionError(ValueError):
@@ -417,9 +418,10 @@ def run_welch_t(
     )
 
 
-def run_paired_t(
-    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
-) -> AnalysisResult:
+def _paired_measurements(
+    frame: pd.DataFrame, item: PlanItem
+) -> tuple[np.ndarray, np.ndarray, dict[str, int], list[str], str]:
+    """Validate the pair structure and align one measurement per condition per pair."""
     variables = _required_variables(item, 3, maximum=3)
     outcome, condition, pair_id = variables
     missing_columns = [name for name in variables if name not in frame.columns]
@@ -437,7 +439,7 @@ def run_paired_t(
         or not bool((pair_conditions == 2).all())
     ):
         raise AnalysisExecutionError("invalid_pair_structure")
-    complete, counts, exclusions = _complete_case(
+    complete, counts, _exclusions = _complete_case(
         frame, variables, numeric=[outcome]
     )
     pair_sizes = complete.groupby(pair_id, observed=True, sort=False).size()
@@ -470,6 +472,13 @@ def run_paired_t(
     )
     if first.size < 2:
         raise AnalysisExecutionError("insufficient_paired_observations")
+    return first, second, counts, exclusions, order_strategy
+
+
+def run_paired_t(
+    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+) -> AnalysisResult:
+    first, second, counts, exclusions, order_strategy = _paired_measurements(frame, item)
     differences = np.sort(first - second)
     estimate = float(np.mean(differences))
     difference_sd = float(np.std(differences, ddof=1))
@@ -698,6 +707,298 @@ def run_correlation(
     )
 
 
+def run_mann_whitney(
+    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+) -> AnalysisResult:
+    variables = _required_variables(item, 2)
+    outcome, exposure = variables[:2]
+    complete, counts, exclusions = _complete_case(
+        frame, [outcome, exposure], numeric=[outcome]
+    )
+    levels, order_strategy = _levels(complete[exposure], expected=2)
+    groups = [
+        np.sort(complete.loc[complete[exposure] == level, outcome].to_numpy(dtype=float))
+        for level in levels
+    ]
+    if any(group.size < 2 for group in groups):
+        raise AnalysisExecutionError("insufficient_group_observations")
+    first, second = groups
+    pooled = np.concatenate(groups)
+    if np.ptp(pooled) == 0:
+        raise AnalysisExecutionError("insufficient_variation")
+    n1, n2 = int(first.size), int(second.size)
+    has_ties = int(np.unique(pooled).size) < int(pooled.size)
+    p_value_method = "exact" if not has_ties and max(n1, n2) <= 25 else "asymptotic"
+    test = stats.mannwhitneyu(
+        first, second, alternative="two-sided", method=p_value_method
+    )
+    u_statistic = _safe_float(test.statistic, "non_finite_test_statistic")
+    differences = np.sort(np.subtract.outer(first, second).ravel())
+    estimate = float(np.median(differences))
+    normal_critical = float(stats.norm.ppf(1 - ALPHA / 2))
+    bound_rank = int(
+        round(n1 * n2 / 2 - normal_critical * np.sqrt(n1 * n2 * (n1 + n2 + 1) / 12.0))
+    )
+    result_warnings: list[str] = []
+    if bound_rank < 1:
+        bound_rank = 1
+        result_warnings.append("nonparametric_ci_extreme_bounds")
+    lower = float(differences[bound_rank - 1])
+    upper = float(differences[differences.size - bound_rank])
+    rank_biserial = 2.0 * u_statistic / (n1 * n2) - 1.0
+    return _result(
+        item=item,
+        context=context,
+        n=counts["used"],
+        estimate=_safe_float(estimate, "non_finite_estimate"),
+        p_value=_p_value(test.pvalue),
+        interval=(lower, upper),
+        effect_name="rank_biserial_r",
+        effect_value=_safe_float(rank_biserial, "non_finite_effect_size"),
+        diagnostics={
+            "counts": counts,
+            "group_sizes": [n1, n2],
+            "u_statistic": u_statistic,
+            "p_value_method": p_value_method,
+            "tie_correction_applied": has_ties,
+            "exposure_level_order": order_strategy,
+            "estimate_direction": "first_ordered_exposure_level_minus_second_ordered_exposure_level",
+            "estimate_definition": "hodges_lehmann_median_of_pairwise_differences",
+            "confidence_interval_method": (
+                "hodges_lehmann_order_statistic_normal_approximation"
+            ),
+        },
+        exclusions=exclusions,
+        transformations=[
+            "complete_case",
+            "rank_transformation",
+            "first_ordered_exposure_level_minus_second_ordered_exposure_level",
+        ],
+        warnings=result_warnings,
+    )
+
+
+def run_wilcoxon_signed_rank(
+    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+) -> AnalysisResult:
+    first, second, counts, exclusions, order_strategy = _paired_measurements(frame, item)
+    differences = np.sort(first - second)
+    nonzero = differences[differences != 0.0]
+    zero_dropped = int(differences.size - nonzero.size)
+    if nonzero.size < 2:
+        raise AnalysisExecutionError("insufficient_variation")
+    absolute = np.abs(nonzero)
+    has_ties = int(np.unique(absolute).size) < int(nonzero.size)
+    p_value_method = (
+        "exact"
+        if not has_ties and zero_dropped == 0 and nonzero.size <= 25
+        else "approx"
+    )
+    if p_value_method == "exact":
+        test = stats.wilcoxon(nonzero, alternative="two-sided", method="exact")
+    else:
+        test = stats.wilcoxon(
+            nonzero, alternative="two-sided", method="approx", correction=True
+        )
+    ranks = stats.rankdata(absolute)
+    t_plus = float(np.sum(ranks[nonzero > 0]))
+    t_minus = float(np.sum(ranks[nonzero < 0]))
+    rank_biserial = (t_plus - t_minus) / (t_plus + t_minus)
+    walsh = np.sort(
+        (np.add.outer(nonzero, nonzero) / 2.0)[np.triu_indices(nonzero.size)]
+    )
+    estimate = float(np.median(walsh))
+    pair_count = int(nonzero.size)
+    normal_critical = float(stats.norm.ppf(1 - ALPHA / 2))
+    bound_rank = int(
+        round(
+            walsh.size / 2
+            - normal_critical
+            * np.sqrt(pair_count * (pair_count + 1) * (2 * pair_count + 1) / 24.0)
+        )
+    )
+    result_warnings: list[str] = []
+    if bound_rank < 1:
+        bound_rank = 1
+        result_warnings.append("nonparametric_ci_extreme_bounds")
+    if zero_dropped:
+        result_warnings.append("zero_differences_dropped")
+    lower = float(walsh[bound_rank - 1])
+    upper = float(walsh[walsh.size - bound_rank])
+    return _result(
+        item=item,
+        context=context,
+        n=int(first.size),
+        estimate=_safe_float(estimate, "non_finite_estimate"),
+        p_value=_p_value(test.pvalue),
+        interval=(lower, upper),
+        effect_name="matched_rank_biserial_r",
+        effect_value=_safe_float(rank_biserial, "non_finite_effect_size"),
+        diagnostics={
+            "counts": counts,
+            "pairs": int(first.size),
+            "pairs_used_for_test": pair_count,
+            "zero_differences_dropped": zero_dropped,
+            "w_statistic": _safe_float(test.statistic, "non_finite_test_statistic"),
+            "p_value_method": p_value_method,
+            "exposure_level_order": order_strategy,
+            "estimate_direction": "first_ordered_exposure_level_minus_second_ordered_exposure_level",
+            "estimate_definition": "pseudomedian_of_walsh_averages_of_nonzero_differences",
+            "confidence_interval_method": (
+                "walsh_average_order_statistic_normal_approximation"
+            ),
+        },
+        exclusions=exclusions,
+        transformations=[
+            "complete_case",
+            "pair_alignment",
+            "within_pair_difference",
+            "signed_rank_transformation",
+        ],
+        warnings=result_warnings,
+    )
+
+
+def run_kruskal_wallis(
+    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+) -> AnalysisResult:
+    variables = _required_variables(item, 2)
+    outcome, exposure = variables[:2]
+    complete, counts, exclusions = _complete_case(
+        frame, [outcome, exposure], numeric=[outcome]
+    )
+    levels, order_strategy = _levels(complete[exposure])
+    if len(levels) < 3:
+        raise AnalysisExecutionError("expected_at_least_3_levels")
+    groups = [
+        np.sort(complete.loc[complete[exposure] == level, outcome].to_numpy(dtype=float))
+        for level in levels
+    ]
+    if any(group.size < 2 for group in groups):
+        raise AnalysisExecutionError("insufficient_group_observations")
+    pooled = np.concatenate(groups)
+    if np.ptp(pooled) == 0:
+        raise AnalysisExecutionError("insufficient_variation")
+    try:
+        h_statistic, omnibus_p = stats.kruskal(*groups)
+    except ValueError as exc:
+        raise AnalysisExecutionError("insufficient_variation") from exc
+    total_n = int(pooled.size)
+    group_count = len(groups)
+    epsilon_squared = (float(h_statistic) - group_count + 1) / (total_n - group_count)
+
+    sizes = [int(group.size) for group in groups]
+    ranks = stats.rankdata(pooled)
+    boundaries = np.cumsum([0, *sizes])
+    rank_means = [
+        float(np.mean(ranks[boundaries[index] : boundaries[index + 1]]))
+        for index in range(group_count)
+    ]
+    _, tie_counts = np.unique(pooled, return_counts=True)
+    tie_sum = float(np.sum(tie_counts.astype(float) ** 3 - tie_counts))
+    variance_base = total_n * (total_n + 1) / 12.0 - tie_sum / (12.0 * (total_n - 1))
+    if variance_base <= 0:
+        raise AnalysisExecutionError("insufficient_variation")
+    comparisons: list[dict[str, object]] = []
+    raw_p_values: list[float] = []
+    for i in range(group_count):
+        for j in range(i + 1, group_count):
+            standard_error = float(
+                np.sqrt(variance_base * (1.0 / sizes[i] + 1.0 / sizes[j]))
+            )
+            z_statistic = (rank_means[i] - rank_means[j]) / standard_error
+            pairwise_p = float(2.0 * stats.norm.sf(abs(z_statistic)))
+            raw_p_values.append(pairwise_p)
+            comparisons.append(
+                {
+                    "first": str(levels[i]),
+                    "second": str(levels[j]),
+                    "rank_mean_difference": _safe_float(
+                        rank_means[i] - rank_means[j], "non_finite_posthoc_estimate"
+                    ),
+                    "z": _safe_float(z_statistic, "non_finite_posthoc_statistic"),
+                    "p_value": _p_value(pairwise_p),
+                }
+            )
+    adjusted = multipletests(raw_p_values, method="holm")[1]
+    for entry, adjusted_p in zip(comparisons, adjusted):
+        entry["p_adjusted"] = _p_value(adjusted_p)
+
+    omnibus_p_value = _p_value(omnibus_p)
+    result_warnings = (
+        ["posthoc_with_nonsignificant_omnibus"] if omnibus_p_value >= ALPHA else []
+    )
+    return _result(
+        item=item,
+        context=context,
+        n=counts["used"],
+        estimate=_safe_float(epsilon_squared, "non_finite_estimate"),
+        p_value=omnibus_p_value,
+        interval=(None, None),
+        effect_name="rank_epsilon_squared",
+        effect_value=_safe_float(epsilon_squared, "non_finite_effect_size"),
+        diagnostics={
+            "counts": counts,
+            "group_sizes": sizes,
+            "h_statistic": _safe_float(h_statistic, "non_finite_test_statistic"),
+            "degrees_freedom": group_count - 1,
+            "exposure_level_order": order_strategy,
+            "effect_size_definition": "epsilon_squared=(H-k+1)/(n-k)",
+            "confidence_interval_method": "not_available_rank_epsilon_squared",
+            "posthoc": {
+                "method": "dunn",
+                "adjustment": "holm",
+                "comparisons": comparisons,
+            },
+        },
+        exclusions=exclusions,
+        transformations=["complete_case", "rank_transformation"],
+        warnings=result_warnings,
+    )
+
+
+def run_spearman(
+    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+) -> AnalysisResult:
+    variables = _required_variables(item, 2)
+    outcome, exposure = variables[:2]
+    complete, counts, exclusions = _complete_case(
+        frame, [outcome, exposure], numeric=[outcome, exposure]
+    )
+    if counts["used"] < 4:
+        raise AnalysisExecutionError("insufficient_correlation_observations")
+    ordered = complete.sort_values([exposure, outcome], kind="mergesort")
+    x = ordered[exposure].to_numpy(dtype=float)
+    y = ordered[outcome].to_numpy(dtype=float)
+    if np.ptp(x) == 0 or np.ptp(y) == 0:
+        raise AnalysisExecutionError("insufficient_variation")
+    analysis = stats.spearmanr(x, y)
+    estimate = _safe_float(analysis.statistic, "non_finite_estimate")
+    clipped = float(np.clip(estimate, -1.0 + np.finfo(float).eps, 1.0 - np.finfo(float).eps))
+    fisher_z = float(np.arctanh(clipped))
+    z_se = 1.03 / np.sqrt(counts["used"] - 3)
+    critical = float(stats.norm.ppf(1 - ALPHA / 2))
+    lower = float(np.tanh(fisher_z - critical * z_se))
+    upper = float(np.tanh(fisher_z + critical * z_se))
+    return _result(
+        item=item,
+        context=context,
+        n=counts["used"],
+        estimate=estimate,
+        p_value=_p_value(analysis.pvalue),
+        interval=(lower, upper),
+        effect_name="spearman_rho",
+        effect_value=estimate,
+        diagnostics={
+            "counts": counts,
+            "selected_test": "spearman",
+            "confidence_interval_method": "fisher_z_fieller_se",
+        },
+        exclusions=exclusions,
+        transformations=["complete_case", "rowwise_pairing", "rank_transformation"],
+    )
+
+
 def _design_matrix(
     complete: pd.DataFrame, predictors: Sequence[str]
 ) -> tuple[pd.DataFrame, str, list[str]]:
@@ -846,8 +1147,12 @@ METHODS: dict[str, Executor] = {
     "welch_t_test": run_welch_t,
     "paired_t_test": run_paired_t,
     "welch_anova": run_welch_anova,
+    "mann_whitney_u": run_mann_whitney,
+    "wilcoxon_signed_rank": run_wilcoxon_signed_rank,
+    "kruskal_wallis": run_kruskal_wallis,
     "chi_square_or_fisher": run_categorical_association,
     "pearson_or_spearman": run_correlation,
+    "spearman_rank": run_spearman,
     "linear_regression": run_linear_regression,
     "logistic_regression": run_logistic_regression,
 }
@@ -871,6 +1176,7 @@ def run_plan(frame: pd.DataFrame, plan: AnalysisPlan) -> AnalysisBundle:
             raise AnalysisExecutionError(f"unknown_selected_method:{item.method}")
         if (
             item.robust_alternative is not None
+            and item.robust_alternative not in METHODS
             and item.robust_alternative not in ALTERNATIVE_METADATA_ONLY
         ):
             raise AnalysisExecutionError(
