@@ -40,13 +40,13 @@ SAFE_VERSION = re.compile(
     r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){1,3}\Z"
 )
 SAFE_EXCLUSION = re.compile(
-    r"(?:complete_case|paired_complete_case):"
+    r"(?:available_case|complete_case|paired_complete_case):"
     r"input=(?P<input>[0-9]+);used=(?P<used>[0-9]+);missing=(?P<missing>[0-9]+)\Z"
 )
 SAFE_SOFTWARE_COMPONENTS = frozenset(
     {"python", "numpy", "pandas", "scipy", "statsmodels"}
 )
-SAFE_TRANSFORMATIONS = frozenset({"deterministic_complete_case_execution"})
+SAFE_TRANSFORMATIONS = frozenset({"deterministic_analysis_execution"})
 REPORT_FIGURE_METHODS = frozenset({"welch_t_test", "paired_t_test", "welch_anova"})
 OBSERVATIONAL_DESIGNS = frozenset({"cross_sectional", "cohort", "case_control"})
 FIXED_METADATA_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
@@ -76,7 +76,8 @@ RESULT_LABELS = {
             "{p_value}, with {effect_name} = {effect_value}."
         ),
         "descriptive_narrative": (
-            "The descriptive analysis included n = {n} analysis units (missing = {missing}). "
+            "The dataset contained {total_n} analysis units. Variable-specific denominators "
+            "ranged from n = {n}; missing counts ranged from {missing}. "
             "The first numeric estimate was {estimate} (95% CI [{lower}, {upper}]); "
             "no hypothesis-test p value or standardized effect size was applicable."
         ),
@@ -85,7 +86,8 @@ RESULT_LABELS = {
         ),
         "table_note": (
             "Note. CI = confidence interval; n = analyzed units. "
-            "Exact p values are shown when available."
+            "The descriptive row shows variable-specific ranges. Exact p values are shown "
+            "when available."
         ),
         "plan_version": "Plan version: {value}",
         "fingerprint": "Source fingerprint prefix: {value}",
@@ -117,7 +119,8 @@ RESULT_LABELS = {
             "{p_value}; {effect_name} = {effect_value}."
         ),
         "descriptive_narrative": (
-            "Betimsel analiz n = {n} analiz birimi içerdi (eksik = {missing}). "
+            "Veri kümesi {total_n} analiz birimi içerdi. Değişkene özgü paydalar n = {n}; "
+            "eksik sayıları {missing} aralığındaydı. "
             "İlk sayısal tahmin {estimate} idi (%95 GA [{lower}, {upper}]); "
             "hipotez testi p değeri ve standartlaştırılmış etki büyüklüğü uygulanamazdı."
         ),
@@ -126,7 +129,8 @@ RESULT_LABELS = {
         ),
         "table_note": (
             "Not. GA = güven aralığı; n = analiz edilen birimler. "
-            "Kesin p değerleri mevcut olduğunda gösterilir."
+            "Betimsel satır değişkene özgü aralıkları gösterir. Kesin p değerleri mevcut "
+            "olduğunda gösterilir."
         ),
         "plan_version": "Plan sürümü: {value}",
         "fingerprint": "Kaynak parmak izi öneki: {value}",
@@ -297,7 +301,7 @@ METHOD_LABELS = {
         "paired_t_test": ("paired comparison", "paired mean difference"),
         "welch_anova": ("Welch omnibus comparison", "omnibus effect"),
         "chi_square_or_fisher": ("categorical association analysis", "odds ratio"),
-        "pearson_or_spearman": ("correlation analysis", "correlation"),
+        "pearson_or_spearman": ("Pearson correlation analysis", "Pearson correlation"),
         "linear_regression": ("linear regression", "regression coefficient"),
         "logistic_regression": ("logistic regression", "odds ratio"),
     },
@@ -307,7 +311,7 @@ METHOD_LABELS = {
         "paired_t_test": ("eşleştirilmiş karşılaştırma", "eşleştirilmiş ortalama farkı"),
         "welch_anova": ("Welch genel karşılaştırması", "genel etki"),
         "chi_square_or_fisher": ("kategorik ilişki analizi", "olasılık oranı"),
-        "pearson_or_spearman": ("korelasyon analizi", "korelasyon"),
+        "pearson_or_spearman": ("Pearson korelasyon analizi", "Pearson korelasyonu"),
         "linear_regression": ("doğrusal regresyon", "regresyon katsayısı"),
         "logistic_regression": ("lojistik regresyon", "olasılık oranı"),
     },
@@ -474,6 +478,7 @@ def _result_values(result: AnalysisResult, language: Language) -> dict[str, str]
     estimate = _format_number(result.estimate)
     effect = _format_number(result.effect_size.value)
     return {
+        "total_n": str(result.n),
         "n": str(used),
         "missing": str(missing),
         "estimate": estimate or labels["not_estimable"],
@@ -499,6 +504,35 @@ def _result_values(result: AnalysisResult, language: Language) -> dict[str, str]
     }
 
 
+def _descriptive_ranges(result: AnalysisResult) -> tuple[str, str]:
+    summaries = result.diagnostics.get("variable_summaries")
+    if not isinstance(summaries, dict) or not summaries:
+        raise ValueError("invalid_descriptive_summaries")
+    denominators: list[int] = []
+    missing_counts: list[int] = []
+    for summary in summaries.values():
+        if not isinstance(summary, dict):
+            raise ValueError("invalid_descriptive_summaries")
+        non_missing = summary.get("non_missing")
+        missing = summary.get("missing")
+        if (
+            type(non_missing) is not int
+            or type(missing) is not int
+            or non_missing < 0
+            or missing < 0
+            or non_missing + missing != result.n
+        ):
+            raise ValueError("invalid_descriptive_summaries")
+        denominators.append(non_missing)
+        missing_counts.append(missing)
+
+    def format_range(values: list[int]) -> str:
+        lower, upper = min(values), max(values)
+        return str(lower) if lower == upper else f"{lower}–{upper}"
+
+    return format_range(denominators), format_range(missing_counts)
+
+
 def _add_results_narrative(
     document: DocumentType,
     brief: StudyBrief,
@@ -514,6 +548,7 @@ def _add_results_narrative(
         document.add_heading(analysis.capitalize(), level=3)
         values = _result_values(result, language)
         if item.method == "descriptive_summary":
+            values["n"], values["missing"] = _descriptive_ranges(result)
             narrative = labels["descriptive_narrative"].format(**values)
         else:
             narrative = labels["narrative"].format(
@@ -657,6 +692,8 @@ def _add_result_table(
         result = bundle.results[item.id]
         analysis, _parameter = _result_labels(item, language)
         values = _result_values(result, language)
+        if item.method == "descriptive_summary":
+            values["n"], values["missing"] = _descriptive_ranges(result)
         row_values = (
             analysis.capitalize(),
             values["n"],

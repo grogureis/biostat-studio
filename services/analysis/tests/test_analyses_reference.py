@@ -135,7 +135,7 @@ def test_ordered_categories_define_effect_direction(core_frame: pd.DataFrame) ->
     assert reverse.effect_size.value == pytest.approx(-forward.effect_size.value)
     assert reverse.provenance.data_fingerprint != forward.provenance.data_fingerprint
     assert forward.diagnostics["estimate_direction"] == (
-        "first_confirmed_exposure_level_minus_second_confirmed_exposure_level"
+        "first_ordered_exposure_level_minus_second_ordered_exposure_level"
     )
 
 
@@ -183,8 +183,8 @@ def test_fingerprint_includes_dtype_and_ordered_category_metadata() -> None:
     assert len(fingerprints) == 3
 
 
-def test_descriptive_summary_uses_the_reported_joint_complete_cases() -> None:
-    """Per-column statistics must not include rows excluded by another required variable."""
+def test_descriptive_summary_reports_variable_specific_denominators() -> None:
+    """Missingness in one variable must not reduce another variable's descriptive denominator."""
     frame = pd.DataFrame(
         {
             "first": [1.0, 2.0, np.nan, 4.0],
@@ -197,24 +197,26 @@ def test_descriptive_summary_uses_the_reported_joint_complete_cases() -> None:
 
     result = run_plan(frame, plan).results["summary"]
 
-    assert result.n == 2
-    assert result.diagnostics["counts"] == {"input": 4, "used": 2, "missing": 2}
+    assert result.n == 4
+    assert result.diagnostics["counts"] == {"input": 4, "used": 4, "missing": 0}
     assert result.diagnostics["variable_summaries"] == {
         "first": {
-            "non_missing": 2,
-            "missing": 2,
-            "unique": 2,
-            "mean": 2.5,
-            "standard_deviation": pytest.approx(2.1213203435596424),
+            "non_missing": 3,
+            "missing": 1,
+            "unique": 3,
+            "mean": pytest.approx(7 / 3),
+            "standard_deviation": pytest.approx(1.5275252316519465),
         },
         "second": {
-            "non_missing": 2,
-            "missing": 2,
-            "unique": 2,
-            "mean": 25.0,
-            "standard_deviation": pytest.approx(21.213203435596427),
+            "non_missing": 3,
+            "missing": 1,
+            "unique": 3,
+            "mean": pytest.approx(80 / 3),
+            "standard_deviation": pytest.approx(15.275252316519467),
         },
     }
+    assert result.exclusions == ["available_case:input=4;used=4;missing=0"]
+    assert result.provenance.transformations == ["available_case_by_variable"]
 
 
 def test_non_finite_values_are_rejected_without_exposing_the_value(

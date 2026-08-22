@@ -526,6 +526,58 @@ def test_regression_with_covariates_retains_adjusted_contract() -> None:
     assert "effect_size:adjusted_regression_coefficient" in item.outputs
 
 
+def test_covariates_without_a_primary_exposure_fail_closed() -> None:
+    """A covariate must not silently become the primary reported effect."""
+    selected_roles = {
+        "age_years": VariableRole(
+            name="age_years", role="outcome", kind="continuous", confirmed=True
+        ),
+        "event_30d": VariableRole(
+            name="event_30d", role="covariate", kind="binary", confirmed=True
+        ),
+    }
+
+    plan = build_plan(
+        brief(exposures=[], covariates=["event_30d"]),
+        core_profile(),
+        selected_roles,
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == ["covariates_without_exposure"]
+
+
+def test_adjusted_multilevel_primary_exposure_fails_closed() -> None:
+    """The result contract cannot truthfully reduce several primary contrasts to one."""
+    profile = core_profile()
+    profile.variables["treatment_group"] = metadata(
+        "treatment_group", "categorical", unique_values=3
+    )
+    selected_roles = {
+        "age_years": VariableRole(
+            name="age_years", role="outcome", kind="continuous", confirmed=True
+        ),
+        "treatment_group": VariableRole(
+            name="treatment_group",
+            role="exposure",
+            kind="categorical",
+            confirmed=True,
+        ),
+        "event_30d": VariableRole(
+            name="event_30d", role="covariate", kind="binary", confirmed=True
+        ),
+    }
+
+    plan = build_plan(
+        brief(covariates=["event_30d"]),
+        profile,
+        selected_roles,
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == ["multilevel_exposure_adjustment_unsupported"]
+
+
 def test_multiple_exposures_fail_closed_without_multiplicity_contract() -> None:
     """An unspecified primary contrast must not be labeled as a single analysis."""
     profile = profile_with_continuous_exposure()

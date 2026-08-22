@@ -129,6 +129,8 @@ def test_results_docx_contains_required_sections_and_scientific_details(
     assert "Figure 1" in text
     assert "n = 11" in text
     assert "missing = 1" in text
+    assert "Variable-specific denominators ranged from n = 11–12" in text
+    assert "missing counts ranged from 0–1" in text
     assert "p = 0.068" in text
     assert "p < 0.001" not in text
     assert "Hedges' g = -1.138" in text
@@ -308,6 +310,8 @@ def test_turkish_table_uses_a_nonwrapping_not_applicable_token(
     )
     first_result = Document(destination).tables[0].rows[1]
 
+    assert first_result.cells[1].text == "11–12"
+    assert first_result.cells[2].text == "0–1"
     assert first_result.cells[5].text == "—"
     assert first_result.cells[6].text == "—"
     assert "Uygulanamaz" not in "\n".join(

@@ -125,6 +125,7 @@ describe("Clinical Calm workflow", () => {
 
     await openApprovedDataPlan(user);
     expect(screen.getByRole("heading", { name: "Analysis plan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Documented alternative (not automatically executed)" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run analysis" })).toBeDisabled();
 
     await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
@@ -217,8 +218,17 @@ describe("Clinical Calm workflow", () => {
     expect(screen.getByText("Çevrimdışı · veriler bu Mac'te kalır")).toBeInTheDocument();
     await openApprovedDataPlan(user, "tr");
     expect(await screen.findByText("Welch independent-samples t-test")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Belgelenmiş alternatif (otomatik yürütülmez)" })).toBeInTheDocument();
     expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ language: "en" }));
     expect(api.invalidateProject).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("checkbox", { name: "Bu planı onayla" }));
+    await user.click(screen.getByRole("button", { name: "Analizi çalıştır" }));
+    expect(await screen.findByRole("heading", { name: "Sonuçlar" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Word raporu" }));
+    const reportLanguage = screen.getByRole("combobox", { name: "Rapor dili" });
+    expect(reportLanguage).toHaveTextContent("İngilizce");
+    expect(reportLanguage).toHaveTextContent("Türkçe");
   });
 
   it("exports the Word report through an explicit accessible action", async () => {

@@ -208,15 +208,16 @@ def _method_contract(
         "pearson_or_spearman": {
             "estimand": "Strength and direction of association between two continuous variables.",
             "rationale": (
-                "Choose Pearson or Spearman within the registered method from confirmed "
-                "scale, estimand, distribution shape, and outlier checks, never from a "
-                "normality p-value alone."
+                "The verified primary method estimates Pearson correlation for two confirmed "
+                "continuous variables. Review linearity, scale, distribution shape, and "
+                "outliers before interpretation; this release does not switch automatically "
+                "to Spearman correlation."
             ),
             "assumptions": [
                 "Observations are paired by row and independent across rows.",
                 "Check linearity or monotonicity, scale, missingness, distribution shape, and influential outliers.",
             ],
-            "effect": "correlation_coefficient",
+            "effect": "pearson_correlation_coefficient",
             "table": "correlation_estimate",
             "figure": "association_scatter",
         },
@@ -326,6 +327,14 @@ def _primary_choice(
         return choose_group_method(outcome_kind, 2, paired=True)
 
     if covariates:
+        if len(exposures) != 1:
+            raise BlockingPlanError("covariates_without_exposure")
+        exposure = exposures[0]
+        if (
+            exposure_kinds == ["categorical"]
+            and profile.variables[exposure].unique_values > 2
+        ):
+            raise BlockingPlanError("multilevel_exposure_adjustment_unsupported")
         if outcome_kind == "continuous":
             return PlanChoice("linear_regression")
         if outcome_kind == "binary":

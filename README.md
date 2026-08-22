@@ -4,7 +4,7 @@ BioStat Studio is an offline-first Apple Silicon macOS application for a guided 
 
 ## Verified vertical-slice scope
 
-The current application accepts `.xlsx` workbooks and implements descriptive summaries, Welch independent-samples and paired t tests, Mann–Whitney U and Wilcoxon signed-rank tests, Welch ANOVA and Kruskal–Wallis tests, chi-square/Fisher testing, Pearson/Spearman correlation, and linear and logistic regression. The guided planner selects only from this verified set, records assumptions and provenance, and requires explicit data-role and immutable-plan approval before execution.
+The current application accepts `.xlsx` workbooks and executes descriptive summaries, Welch independent-samples and paired t tests, Welch ANOVA, chi-square/Fisher testing, Pearson correlation, and linear and logistic regression. The guided planner records assumptions, provenance, and pre-planned nonparametric alternatives, but Mann–Whitney U, Wilcoxon signed-rank, Kruskal–Wallis, and Spearman correlation are not automatically executed in this release. Explicit data-role and immutable-plan approval are required before execution.
 
 CSV and SAV importers are future adapters. Advanced statistics, machine learning, validated prediction-model development, and causal-inference workflows are also future work; the current release does not claim those capabilities.
 

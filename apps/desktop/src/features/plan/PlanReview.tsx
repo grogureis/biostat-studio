@@ -13,24 +13,24 @@ const copy = {
   en: {
     eyebrow: "03 / Decision record",
     title: "Analysis plan",
-    intro: "Review the estimand, assumptions, and robust alternative before executing anything.",
+    intro: "Review the estimand, assumptions, and the documented alternative before executing the approved primary method.",
     loading: "Preparing an analysis plan from the study brief…",
     approve: "Approve this plan",
     run: "Run analysis",
     blocked: "Resolve the blocking items before approving this plan.",
     assumptions: "Assumptions to review",
-    alternative: "Robust alternative",
+    alternative: "Documented alternative (not automatically executed)",
   },
   tr: {
     eyebrow: "03 / Karar kaydı",
     title: "Analiz planı",
-    intro: "Herhangi bir işlem yürütmeden önce tahmin edilecek değeri, varsayımları ve sağlam alternatifi gözden geçirin.",
+    intro: "Onaylanan birincil yöntemi yürütmeden önce tahmin edilecek değeri, varsayımları ve belgelenmiş alternatifi gözden geçirin.",
     loading: "Çalışma özetinden analiz planı hazırlanıyor…",
     approve: "Bu planı onayla",
     run: "Analizi çalıştır",
     blocked: "Bu planı onaylamadan önce engelleyici maddeleri çözün.",
     assumptions: "Gözden geçirilecek varsayımlar",
-    alternative: "Sağlam alternatif",
+    alternative: "Belgelenmiş alternatif (otomatik yürütülmez)",
   },
 } as const;
 

@@ -32,6 +32,15 @@ def extract_numeric_tokens(path: Path) -> list[str]:
 
 def _build_reports(tmp_path: Path) -> tuple[Path, Path]:
     frame = pd.read_excel(FIXTURE_PATH, sheet_name="Analysis")
+    descriptive = PlanItem(
+        id="descriptive_summary",
+        estimand="Confirmed structured descriptive estimand.",
+        method="descriptive_summary",
+        rationale="Confirmed structured descriptive rationale.",
+        required_variables=["age_years", "treatment_group"],
+        assumptions=["Confirmed assumptions."],
+        outputs=["table:descriptive_summary"],
+    )
     item = PlanItem(
         id="primary_outcome",
         estimand="Confirmed structured estimand.",
@@ -41,7 +50,11 @@ def _build_reports(tmp_path: Path) -> tuple[Path, Path]:
         assumptions=["Confirmed assumptions."],
         outputs=["effect_size:required", "confidence_interval:95_percent"],
     )
-    plan = AnalysisPlan(version=3, items=[item], warnings=["review_assumptions"])
+    plan = AnalysisPlan(
+        version=3,
+        items=[descriptive, item],
+        warnings=["review_assumptions"],
+    )
     brief = StudyBrief(
         title="Cardiovascular outcomes",
         question="Is treatment associated with age at the measured endpoint?",

@@ -27,7 +27,9 @@ const labels = {
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
   pickerFailure: "The workbook picker could not be opened. Try again.",
     observations: "observations",
-    missing: "missing", role: "Role for", kind: "Kind for", variables: "Variable structure", warnings: "Questions to resolve",
+    missing: "missing", unique: "unique", role: "Role for", kind: "Kind for", variables: "Variable structure", warnings: "Questions to resolve",
+    roles: { none: "None", outcome: "Outcome", exposure: "Exposure", covariate: "Covariate", pair_id: "Pair ID", exclude: "Exclude" },
+    kinds: { continuous: "Continuous", binary: "Binary", categorical: "Categorical", date: "Date", identifier: "Identifier", exclude: "Exclude" },
   },
   tr: {
     eyebrow: "02 / Veri kökeni",
@@ -43,7 +45,9 @@ const labels = {
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
   pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
     observations: "gözlem",
-    missing: "eksik", role: "Rol", kind: "Tür", variables: "Değişken yapısı", warnings: "Çözülmesi gereken sorular",
+    missing: "eksik", unique: "benzersiz", role: "Rol", kind: "Tür", variables: "Değişken yapısı", warnings: "Çözülmesi gereken sorular",
+    roles: { none: "Yok", outcome: "Sonuç", exposure: "Maruziyet", covariate: "Kovaryat", pair_id: "Eşleştirme kimliği", exclude: "Dışla" },
+    kinds: { continuous: "Sürekli", binary: "İkili", categorical: "Kategorik", date: "Tarih", identifier: "Tanımlayıcı", exclude: "Dışla" },
   },
 } as const;
 
@@ -113,9 +117,9 @@ export function DataIntake({ api, dataFile, approved, language, brief, onFile, o
       {profile ? <section className="variable-profile" aria-labelledby="variable-profile-title">
         <h2 id="variable-profile-title">{copy.variables}</h2>
         {Object.entries(profile.variables).map(([name, variable]) => <article key={name} className="variable-row">
-          <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} unique</p>
-          <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}><option value="none">None</option><option value="outcome">Outcome</option><option value="exposure">Exposure</option><option value="covariate">Covariate</option><option value="pair_id">Pair ID</option><option value="exclude">Exclude</option></select></label>
-          <label>{copy.kind} {variable.display_name}<select aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}><option value="continuous">Continuous</option><option value="binary">Binary</option><option value="categorical">Categorical</option><option value="date">Date</option><option value="identifier">Identifier</option><option value="exclude">Exclude</option></select></label>
+          <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} {copy.unique}</p>
+          <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>{copy.kind} {variable.display_name}<select aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}>{Object.entries(copy.kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         </article>)}
         {profile.warnings.length ? <div className="warning-line"><strong>{copy.warnings}</strong><ul>{profile.warnings.map((warning) => <li key={`${warning.code}:${warning.column ?? "all"}`}>{warning.message}</li>)}</ul></div> : null}
       </section> : null}

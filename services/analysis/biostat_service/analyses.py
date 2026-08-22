@@ -286,16 +286,22 @@ def run_descriptive_summary(
     frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
 ) -> AnalysisResult:
     variables = _required_variables(item, 1)
-    complete, counts, exclusions = _complete_case(frame, variables)
+    missing_columns = [name for name in variables if name not in frame.columns]
+    if missing_columns:
+        raise AnalysisExecutionError(f"unknown_required_variable:{missing_columns[0]}")
+    counts = {"input": int(len(frame)), "used": int(len(frame)), "missing": 0}
+    exclusions = [
+        f"available_case:input={counts['input']};used={counts['used']};missing=0"
+    ]
     summaries: dict[str, dict[str, float | int | str | None]] = {}
     first_estimate: float | None = None
     first_interval: tuple[float | None, float | None] = (None, None)
     for name in variables:
-        series = complete[name]
-        non_missing = series
+        series = frame[name]
+        non_missing = series.dropna()
         summary: dict[str, float | int | str | None] = {
             "non_missing": int(non_missing.shape[0]),
-            "missing": counts["missing"],
+            "missing": int(series.isna().sum()),
             "unique": int(non_missing.nunique(dropna=True)),
         }
         if pd.api.types.is_numeric_dtype(series) and not non_missing.empty:
@@ -321,7 +327,7 @@ def run_descriptive_summary(
     return _result(
         item=item,
         context=context,
-        n=counts["used"],
+        n=counts["input"],
         estimate=first_estimate,
         p_value=None,
         interval=first_interval,
@@ -329,7 +335,7 @@ def run_descriptive_summary(
         effect_value=None,
         diagnostics={"counts": counts, "variable_summaries": summaries},
         exclusions=exclusions,
-        transformations=["complete_case_for_joint_summary"],
+        transformations=["available_case_by_variable"],
     )
 
 
@@ -389,7 +395,7 @@ def run_welch_t(
             "test_statistic": _safe_float(test.statistic, "non_finite_test_statistic"),
             "degrees_freedom": _safe_float(degrees_freedom, "non_finite_degrees_freedom"),
             "exposure_level_order": order_strategy,
-            "estimate_direction": "first_confirmed_exposure_level_minus_second_confirmed_exposure_level",
+            "estimate_direction": "first_ordered_exposure_level_minus_second_ordered_exposure_level",
             "effect_size_uncertainty": {
                 "standard_error": _safe_float(hedges_se, "non_finite_effect_size_uncertainty"),
                 "confidence_interval": {
@@ -406,7 +412,7 @@ def run_welch_t(
         exclusions=exclusions,
         transformations=[
             "complete_case",
-            "first_confirmed_exposure_level_minus_second_confirmed_exposure_level",
+            "first_ordered_exposure_level_minus_second_ordered_exposure_level",
         ],
     )
 
@@ -495,7 +501,7 @@ def run_paired_t(
             "test_statistic": _safe_float(test.statistic, "non_finite_test_statistic"),
             "degrees_freedom": int(degrees_freedom),
             "exposure_level_order": order_strategy,
-            "estimate_direction": "first_confirmed_exposure_level_minus_second_confirmed_exposure_level",
+            "estimate_direction": "first_ordered_exposure_level_minus_second_ordered_exposure_level",
             "effect_size_uncertainty": {
                 "standard_error": _safe_float(hedges_se, "non_finite_effect_size_uncertainty"),
                 "confidence_interval": {
@@ -641,7 +647,7 @@ def run_categorical_association(
             "phi": _safe_float(phi, "non_finite_phi"),
             "outcome_level_order": outcome_strategy,
             "exposure_level_order": exposure_strategy,
-            "estimate_direction": "first_confirmed_levels_odds_ratio",
+            "estimate_direction": "first_ordered_outcome_and_exposure_levels_odds_ratio",
             "zero_cell_correction": 0.5 if correction_applied else 0.0,
         },
         exclusions=exclusions,
@@ -763,7 +769,7 @@ def run_linear_regression(
             "residual_degrees_freedom": _safe_float(fitted.df_resid, "non_finite_degrees_freedom"),
             "r_squared": _safe_float(fitted.rsquared, "non_finite_r_squared"),
             "condition_number": _safe_float(fitted.condition_number, "non_finite_condition_number"),
-            "primary_coefficient": "first_confirmed_predictor_contrast",
+            "primary_coefficient": "primary_predictor_first_encoded_term",
         },
         exclusions=exclusions,
         transformations=["complete_case", *encoding],
@@ -827,8 +833,8 @@ def run_logistic_regression(
             "iterations": int(fitted.mle_retvals.get("iterations", 0)),
             "log_likelihood": _safe_float(fitted.llf, "non_finite_log_likelihood"),
             "outcome_level_order": outcome_strategy,
-            "outcome_coding": "first_confirmed_level_is_event",
-            "primary_coefficient": "first_confirmed_predictor_contrast",
+            "outcome_coding": "first_ordered_outcome_level_is_event",
+            "primary_coefficient": "primary_predictor_first_encoded_term",
         },
         exclusions=exclusions,
         transformations=["complete_case", "binary_outcome_coding", *encoding],
@@ -928,7 +934,7 @@ def run_plan(frame: pd.DataFrame, plan: AnalysisPlan) -> AnalysisBundle:
     bundle_provenance = _provenance(
         context,
         all_exclusions,
-        ["deterministic_complete_case_execution"],
+        ["deterministic_analysis_execution"],
     )
     return AnalysisBundle(
         results=results,

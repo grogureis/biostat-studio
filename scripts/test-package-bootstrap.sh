@@ -32,7 +32,7 @@ bash "$ROOT/scripts/bootstrap-analysis-venv.sh"
 test -f "$VENV/.biostat-requirements.sha256"
 grep -Fqx "venv $VENV" "$LOG"
 grep -Fq "pip -m pip install --disable-pip-version-check --no-input --requirement $ROOT/services/analysis/requirements.lock" "$LOG"
-grep -Fq "pip -m pip install --disable-pip-version-check --no-input --no-deps -e $ROOT/services/analysis --no-build-isolation --config-settings editable_mode=compat" "$LOG"
+grep -Fq "pip -m pip install --disable-pip-version-check --no-input --no-deps --force-reinstall $ROOT/services/analysis --no-build-isolation" "$LOG"
 
 first_count=$(wc -l < "$LOG")
 BIOSTAT_BOOTSTRAP_LOG="$LOG" \
