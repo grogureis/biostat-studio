@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "test": "bash scripts/test-all.sh",
-    "test:python": "services/analysis/.venv/bin/python -m pytest services/analysis/tests",
+    "test:python": "services/analysis/.venv-py312/bin/python -m pytest services/analysis/tests",
     "test:desktop": "npm run test --workspace apps/desktop",
     "dev": "npm run dev --workspace apps/desktop",
     "package:mac": "bash scripts/package-macos.sh"

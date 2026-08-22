@@ -70,7 +70,7 @@ export function parseReadiness(line: string): SidecarReadiness {
 function findDevelopmentRoot(cwd: string, exists: (path: string) => boolean): string {
   const candidates = [cwd, resolve(cwd, "../.."), resolve(cwd, "../../..")];
   const root = candidates.find((candidate) =>
-    exists(join(candidate, "services", "analysis", ".venv", "bin", "python")),
+    exists(join(candidate, "services", "analysis", ".venv-py312", "bin", "python")),
   );
 
   if (!root) {
@@ -96,7 +96,7 @@ export function resolveSidecarLaunchForEnvironment({
 
   const root = findDevelopmentRoot(cwd, exists);
   return {
-    sidecarPath: join(root, "services", "analysis", ".venv", "bin", "python"),
+    sidecarPath: join(root, "services", "analysis", ".venv-py312", "bin", "python"),
     sidecarArgs: ["-m", "biostat_service.app"],
   };
 }

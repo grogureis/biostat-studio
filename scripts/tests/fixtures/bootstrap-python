@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if test "${1:-}" = "-c"; then
+  printf '%s\n' "${BIOSTAT_FAKE_VERSION:-3.12.99}"
+  exit 0
+fi
+
+if test "${1:-}" = "-m" && test "${2:-}" = "venv"; then
+  printf 'venv %s\n' "$3" >> "$BIOSTAT_BOOTSTRAP_LOG"
+  mkdir -p "$3/bin"
+  cp "$0" "$3/bin/python"
+  chmod +x "$3/bin/python"
+  exit 0
+fi
+
+printf 'pip %s\n' "$*" >> "$BIOSTAT_BOOTSTRAP_LOG"

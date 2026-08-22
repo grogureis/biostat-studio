@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ANALYSIS_VENV="${BIOSTAT_ANALYSIS_VENV:-$ROOT/services/analysis/.venv}"
+ANALYSIS_VENV="${BIOSTAT_ANALYSIS_VENV:-$ROOT/services/analysis/.venv-py312}"
 PYTHON="$ANALYSIS_VENV/bin/python"
 
 test "$(uname -m)" = "arm64"

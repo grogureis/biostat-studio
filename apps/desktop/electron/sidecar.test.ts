@@ -191,10 +191,10 @@ describe("parseReadiness", () => {
     const development = resolveSidecarLaunchForEnvironment({
       resourcesPath: "/application/Contents/Resources",
       cwd: "/workspace/apps/desktop",
-      exists: (path) => path === "/workspace/services/analysis/.venv/bin/python",
+      exists: (path) => path === "/workspace/services/analysis/.venv-py312/bin/python",
     });
     expect(development).toEqual({
-      sidecarPath: "/workspace/services/analysis/.venv/bin/python",
+      sidecarPath: "/workspace/services/analysis/.venv-py312/bin/python",
       sidecarArgs: ["-m", "biostat_service.app"],
     });
   });

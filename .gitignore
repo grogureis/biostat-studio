@@ -3,6 +3,7 @@
 
 # Repository-local dependencies and build output
 services/analysis/.venv/
+services/analysis/.venv-py312/
 services/analysis/build/
 *.egg-info/
 node_modules/
@@ -15,6 +16,7 @@ apps/desktop/electron-dist/
 apps/desktop/build/icon.iconset/
 apps/desktop/test-results/
 **/.pytest_cache/
+**/__pycache__/
 
 # Local operator and agent context
 AGENTS.md

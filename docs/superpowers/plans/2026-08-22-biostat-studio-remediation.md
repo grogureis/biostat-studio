@@ -141,7 +141,8 @@
 **Files:**
 - Modify: `scripts/bootstrap-analysis-venv.sh`
 - Modify: `scripts/package-macos.sh`
-- Modify: `scripts/tests/test-bootstrap-analysis-venv.sh`
+- Modify: `scripts/test-package-bootstrap.sh`
+- Create: `scripts/tests/fixtures/bootstrap-python`
 - Modify: `README.md`
 - Refresh: `services/analysis/requirements.lock` only if Python 3.12 resolution requires a pin change.
 
@@ -149,12 +150,12 @@
 - Consumes: an installed `python3.12` executable.
 - Produces: a stamped Python 3.12 venv and a Python 3.12 PyInstaller sidecar.
 
-- [ ] Check for `python3.12`; if absent, stop and request approval before installing system software.
-- [ ] Extend the bootstrap behavior test so an unsupported interpreter fails with a clear message and Python 3.12 succeeds.
-- [ ] Run it to observe RED under the current generic `python3` selection.
-- [ ] Default `BIOSTAT_BOOTSTRAP_PYTHON` to `python3.12`, assert `3.12.x`, and include interpreter identity in the bootstrap stamp so an old venv cannot be reused.
-- [ ] Build a fresh isolated Python 3.12 venv; run `pip check`, the Python suite, and sidecar self-test before replacing the packaging input.
-- [ ] Rebuild the arm64 app/DMG and verify the bundled sidecar reports Python 3.12, passes self-test, and contains no x86_64 slice.
+- [x] Check for `python3.12`; if absent, stop and request approval before installing system software.
+- [x] Extend the bootstrap behavior test so an unsupported interpreter fails with a clear message and Python 3.12 succeeds.
+- [x] Run it to observe RED under the current generic `python3` selection.
+- [x] Default `BIOSTAT_BOOTSTRAP_PYTHON` to `python3.12`, assert `3.12.x`, and include interpreter identity in the bootstrap stamp so an old venv cannot be reused.
+- [x] Build a fresh isolated Python 3.12 venv; run `pip check`, the Python suite, and sidecar self-test before replacing the packaging input.
+- [x] Rebuild the arm64 app/DMG and verify the bundled sidecar reports Python 3.12, passes self-test, and contains no x86_64 slice.
 
 ### Task 8: Final automated and operator acceptance gates
 

@@ -10,14 +10,14 @@ CSV and SAV importers are future adapters. Advanced statistics, machine learning
 
 ## Clean checkout and local development
 
-The repository uses only local dependencies. From a clean checkout, install the locked Node workspace packages and create the repository-local Python environment:
+Install Python 3.12 first (for example, `brew install python@3.12`). From a clean checkout, install the locked Node workspace packages and create the repository-local Python environment:
 
 ```bash
 npm ci --no-audit --no-fund
 bash scripts/bootstrap-analysis-venv.sh
 ```
 
-The bootstrap script creates or reuses `services/analysis/.venv`, installs the pinned `services/analysis/requirements.lock` dependencies, then installs the local analysis package without system-wide changes. It stores a lock-file hash stamp and skips reinstalling unchanged environments. Start the desktop shell with:
+The bootstrap script requires Python 3.12, creates or reuses `services/analysis/.venv-py312`, installs the pinned `services/analysis/requirements.lock` dependencies, then installs the local analysis package without changing macOS system Python. Its lock stamp includes both the dependency hash and interpreter version, and it skips reinstalling an unchanged environment. Start the desktop shell with:
 
 ```bash
 npm run dev

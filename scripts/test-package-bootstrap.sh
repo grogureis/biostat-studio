@@ -9,19 +9,20 @@ FAKE_PYTHON="$TEST_ROOT/python3"
 VENV="$TEST_ROOT/analysis-venv"
 LOG="$TEST_ROOT/bootstrap.log"
 
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'set -euo pipefail' \
-  'if test "$1" = "-m" && test "$2" = "venv"; then' \
-  '  printf "venv %s\\n" "$3" >> "$BIOSTAT_BOOTSTRAP_LOG"' \
-  '  mkdir -p "$3/bin"' \
-  '  printf "%s\\n" "#!/usr/bin/env bash" "set -euo pipefail" "printf '\''pip %s\\n'\'' \"$*\" >> \"\$BIOSTAT_BOOTSTRAP_LOG\"" > "$3/bin/python"' \
-  '  chmod +x "$3/bin/python"' \
-  '  exit 0' \
-  'fi' \
-  'printf "unexpected %s\\n" "$*" >> "$BIOSTAT_BOOTSTRAP_LOG"' \
-  'exit 1' > "$FAKE_PYTHON"
+cp "$ROOT/scripts/tests/fixtures/bootstrap-python" "$FAKE_PYTHON"
 chmod +x "$FAKE_PYTHON"
+
+OLD_VENV="$TEST_ROOT/old-analysis-venv"
+set +e
+BIOSTAT_FAKE_VERSION="3.9.99" \
+BIOSTAT_BOOTSTRAP_LOG="$LOG" \
+BIOSTAT_BOOTSTRAP_PYTHON="$FAKE_PYTHON" \
+BIOSTAT_ANALYSIS_VENV="$OLD_VENV" \
+bash "$ROOT/scripts/bootstrap-analysis-venv.sh"
+old_status=$?
+set -e
+test "$old_status" -ne 0
+test ! -e "$OLD_VENV"
 
 BIOSTAT_BOOTSTRAP_LOG="$LOG" \
 BIOSTAT_BOOTSTRAP_PYTHON="$FAKE_PYTHON" \
@@ -31,7 +32,7 @@ bash "$ROOT/scripts/bootstrap-analysis-venv.sh"
 test -f "$VENV/.biostat-requirements.sha256"
 grep -Fqx "venv $VENV" "$LOG"
 grep -Fq "pip -m pip install --disable-pip-version-check --no-input --requirement $ROOT/services/analysis/requirements.lock" "$LOG"
-grep -Fq "pip -m pip install --disable-pip-version-check --no-input --no-deps -e $ROOT/services/analysis" "$LOG"
+grep -Fq "pip -m pip install --disable-pip-version-check --no-input --no-deps -e $ROOT/services/analysis --no-build-isolation --config-settings editable_mode=compat" "$LOG"
 
 first_count=$(wc -l < "$LOG")
 BIOSTAT_BOOTSTRAP_LOG="$LOG" \

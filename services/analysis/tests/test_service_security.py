@@ -3,6 +3,7 @@ import os
 import selectors
 import subprocess
 import sys
+import time
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -33,6 +34,18 @@ def _approved_roles(created: dict) -> list[dict]:
         }
         for name, metadata in created["profile"]["variables"].items()
     ]
+
+
+def _wait_for_job(client, headers: dict, job_id: str, terminal_states: set[str], timeout: float = 5.0):
+    deadline = time.monotonic() + timeout
+    while True:
+        response = client.get(f"/v1/jobs/{job_id}", headers=headers)
+        assert response.status_code == 200
+        if response.json()["status"] in terminal_states:
+            return response
+        if time.monotonic() >= deadline:
+            return response
+        time.sleep(0.01)
 
 
 def test_health_is_available_on_loopback(client):
@@ -268,10 +281,9 @@ def test_report_uses_the_immutable_output_of_the_requested_job(client, tmp_path:
             "/v1/jobs", headers=headers,
             json={"project_id": project_id, "approved_plan_revision": plan["revision"], "approved_plan_digest": plan["digest"]},
         ).json()
-        for _ in range(100):
-            state = client.get(f"/v1/jobs/{queued['id']}", headers=headers).json()
-            if state["status"] in {"completed", "failed", "cancelled"}:
-                break
+        state = _wait_for_job(
+            client, headers, queued["id"], {"completed", "failed", "cancelled"}
+        ).json()
         assert state["status"] == "completed"
         return queued["id"]
 
@@ -428,10 +440,7 @@ def test_cancelled_pipeline_cleans_staging_and_never_becomes_reportable(client, 
     cancelled = client.post(f"/v1/jobs/{queued['id']}/cancel", headers=headers, json={})
     assert cancelled.json()["status"] == "cancelling"
     release_figures.set()
-    for _ in range(100):
-        state = client.get(f"/v1/jobs/{queued['id']}", headers=headers).json()
-        if state["status"] == "cancelled":
-            break
+    state = _wait_for_job(client, headers, queued["id"], {"cancelled"}).json()
 
     assert state["status"] == "cancelled"
     assert state["result"] is None
@@ -510,11 +519,7 @@ def test_authenticated_project_plan_job_and_report_routes_keep_values_out_of_res
     )
     assert queued.status_code == 200
     job_id = queued.json()["id"]
-    for _ in range(100):
-        status = client.get(f"/v1/jobs/{job_id}", headers=headers)
-        assert status.status_code == 200
-        if status.json()["status"] in {"completed", "failed", "cancelled"}:
-            break
+    status = _wait_for_job(client, headers, job_id, {"completed", "failed", "cancelled"})
     assert status.json()["status"] == "completed"
     assert status.json()["result"]["results"]
     assert "control" not in status.text
