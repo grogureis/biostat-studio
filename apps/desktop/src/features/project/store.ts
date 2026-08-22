@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useReducer } from "react";
 
 import type { AnalysisPlan, AnalysisResult, Language, StudyBrief } from "../../api/types";
 
@@ -15,31 +15,70 @@ const emptyBrief: StudyBrief = {
   language: "en",
 };
 
+interface ProjectState {
+  activeStep: WorkflowStep;
+  language: Language;
+  brief: StudyBrief;
+  dataFile: string | null;
+  dataApproved: boolean;
+  plan: AnalysisPlan | null;
+  planApproved: boolean;
+  results: AnalysisResult[];
+}
+
+const initialState: ProjectState = {
+  activeStep: "study",
+  language: "en",
+  brief: emptyBrief,
+  dataFile: null,
+  dataApproved: false,
+  plan: null,
+  planApproved: false,
+  results: [],
+};
+
+type Action =
+  | { type: "step"; value: WorkflowStep }
+  | { type: "language"; value: Language }
+  | { type: "brief"; value: StudyBrief }
+  | { type: "data"; value: string | null }
+  | { type: "data_approved" }
+  | { type: "plan"; value: AnalysisPlan | null }
+  | { type: "plan_approved"; value: boolean }
+  | { type: "results"; value: AnalysisResult[] };
+
+function clearDependents(state: ProjectState): ProjectState {
+  return { ...state, dataApproved: false, plan: null, planApproved: false, results: [] };
+}
+
+function reducer(state: ProjectState, action: Action): ProjectState {
+  switch (action.type) {
+    case "step": return { ...state, activeStep: action.value };
+    case "language": return clearDependents({
+      ...state,
+      language: action.value,
+      brief: { ...state.brief, language: action.value },
+    });
+    case "brief": return clearDependents({ ...state, brief: action.value });
+    case "data": return clearDependents({ ...state, dataFile: action.value });
+    case "data_approved": return { ...state, dataApproved: true };
+    case "plan": return { ...state, plan: action.value, planApproved: false, results: [] };
+    case "plan_approved": return { ...state, planApproved: action.value };
+    case "results": return { ...state, results: action.value };
+  }
+}
+
 export function useProjectStore() {
-  const [activeStep, setActiveStep] = useState<WorkflowStep>("study");
-  const [language, setLanguageState] = useState<Language>("en");
-  const [brief, setBrief] = useState<StudyBrief>(emptyBrief);
-  const [dataFile, setDataFile] = useState<string | null>(null);
-  const [plan, setPlan] = useState<AnalysisPlan | null>(null);
-  const [results, setResults] = useState<AnalysisResult[]>([]);
-
-  const setLanguage = useCallback((next: Language) => {
-    setLanguageState(next);
-    setBrief((current) => ({ ...current, language: next }));
-  }, []);
-
+  const [state, dispatch] = useReducer(reducer, initialState);
   return {
-    activeStep,
-    setActiveStep,
-    language,
-    setLanguage,
-    brief,
-    setBrief,
-    dataFile,
-    setDataFile,
-    plan,
-    setPlan,
-    results,
-    setResults,
+    ...state,
+    setActiveStep: (value: WorkflowStep) => dispatch({ type: "step", value }),
+    setLanguage: (value: Language) => dispatch({ type: "language", value }),
+    setBrief: (value: StudyBrief) => dispatch({ type: "brief", value }),
+    setDataFile: (value: string | null) => dispatch({ type: "data", value }),
+    approveDataStructure: () => dispatch({ type: "data_approved" }),
+    setPlan: (value: AnalysisPlan | null) => dispatch({ type: "plan", value }),
+    setPlanApproved: (value: boolean) => dispatch({ type: "plan_approved", value }),
+    setResults: (value: AnalysisResult[]) => dispatch({ type: "results", value }),
   };
 }

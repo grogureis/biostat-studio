@@ -72,10 +72,10 @@ describe("Electron lifecycle and renderer origin policy", () => {
     expect(quit).toHaveBeenCalledTimes(1);
   });
 
-  it("exposes only the four approved renderer capabilities", async () => {
-    const channels: string[] = [];
-    const bridge = createBiostatBridge(async <T>(channel: string): Promise<T> => {
-      channels.push(channel);
+  it("keeps the session secret out of the renderer and exposes a narrow API proxy", async () => {
+    const calls: Array<{ channel: string; payload: unknown }> = [];
+    const bridge = createBiostatBridge(async <T>(channel: string, payload?: unknown): Promise<T> => {
+      calls.push({ channel, payload });
       return null as T;
     });
 
@@ -83,17 +83,17 @@ describe("Electron lifecycle and renderer origin policy", () => {
       "selectDataFile",
       "selectProject",
       "selectReportDestination",
-      "getApiSession",
+      "requestApi",
     ]);
     await bridge.selectDataFile();
     await bridge.selectProject();
     await bridge.selectReportDestination();
-    await bridge.getApiSession();
-    expect(channels).toEqual([
-      "biostat:select-data-file",
-      "biostat:select-project",
-      "biostat:select-report-destination",
-      "biostat:get-api-session",
+    await bridge.requestApi({ path: "/v1/session", method: "GET" });
+    expect(calls).toEqual([
+      { channel: "biostat:select-data-file", payload: undefined },
+      { channel: "biostat:select-project", payload: undefined },
+      { channel: "biostat:select-report-destination", payload: undefined },
+      { channel: "biostat:request-api", payload: { path: "/v1/session", method: "GET" } },
     ]);
   });
 });

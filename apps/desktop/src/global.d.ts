@@ -2,7 +2,11 @@ interface BiostatBridge {
   selectDataFile(): Promise<string | null>;
   selectProject(): Promise<string | null>;
   selectReportDestination(): Promise<string | null>;
-  getApiSession(): Promise<{ apiBase: string; token: string }>;
+  requestApi(request: {
+    path: string;
+    method: "GET" | "POST";
+    body?: unknown;
+  }): Promise<{ ok: boolean; status: number; body: unknown }>;
 }
 
 interface Window {

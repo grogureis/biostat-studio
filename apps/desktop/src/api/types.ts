@@ -42,6 +42,8 @@ export interface PlanItem {
 
 export interface AnalysisPlan {
   version: number;
+  revision: string;
+  digest: string;
   items: PlanItem[];
   blocking_errors: string[];
   warnings: string[];

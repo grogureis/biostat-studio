@@ -1,22 +1,37 @@
-import { test, expect } from "playwright/test";
+import { _electron as electron, expect, test } from "playwright/test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-/**
- * This runs against the packaged Electron app in release verification.  Local
- * unit/CI environments intentionally skip it because native file/save dialogs
- * and the signed loopback sidecar are not available to a browser-only runner.
- */
-test.describe("core local workflow", () => {
-  test.skip(process.env.BIOSTAT_E2E !== "1", "Requires the packaged Electron sidecar and native dialogs.");
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-  test("imports, approves, analyzes, and exports", async ({ page }) => {
-    await page.getByRole("button", { name: "Import Excel" }).click();
-    await expect(page.getByText("12 observations")).toBeVisible();
-    await page.getByRole("button", { name: "Approve data structure" }).click();
-    await page.getByRole("button", { name: "Analysis plan" }).click();
-    await page.getByLabel("Approve this plan").check();
-    await page.getByRole("button", { name: "Run analysis" }).click();
-    await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
-    await page.getByRole("button", { name: "Word report" }).click();
-    await page.getByRole("button", { name: "Export Word report" }).click();
+test.describe("core local Electron workflow", () => {
+  test.skip(process.env.BIOSTAT_E2E !== "1", "Set BIOSTAT_E2E=1 to launch the real Electron test harness.");
+
+  test("imports, approves, analyzes, and exports through an Electron window", async () => {
+    const application = await electron.launch({
+      args: [path.join(currentDirectory, "electron-harness.cjs")],
+    });
+    try {
+      const page = await application.firstWindow();
+      await page.getByRole("textbox", { name: "Project title" }).fill("Fixture study");
+      await page.getByRole("textbox", { name: "Research question" }).fill("Is the outcome different between groups?");
+      await page.getByRole("textbox", { name: "Hypothesis" }).fill("The groups have different outcomes.");
+      await page.getByRole("textbox", { name: "Outcome variables" }).fill("outcome");
+      await page.getByRole("textbox", { name: "Exposure variables" }).fill("group");
+      await page.getByRole("button", { name: "Data & variables" }).click();
+      await page.getByRole("button", { name: "Import Excel" }).click();
+      await expect(page.getByText("12 observations")).toBeVisible();
+      await page.getByRole("button", { name: "Approve data structure" }).click();
+      await expect(page.getByRole("button", { name: "Data structure approved" })).toBeDisabled();
+      await page.getByRole("button", { name: "Analysis plan" }).click();
+      await page.getByLabel("Approve this plan").check();
+      await page.getByRole("button", { name: "Run analysis" }).click();
+      await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
+      await page.getByRole("button", { name: "Word report" }).click();
+      await page.getByRole("button", { name: "Export Word report" }).click();
+      await expect(page.getByRole("status")).toHaveText("Word report saved");
+    } finally {
+      await application.close();
+    }
   });
 });

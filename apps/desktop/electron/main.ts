@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createApplicationLifecycle } from "./lifecycle";
 import { allowsRendererNavigation, requireLocalDevelopmentUrl } from "./renderer-security";
 import { startSidecar, stopSidecar, type SidecarSession } from "./sidecar";
+import { createAuthenticatedApiProxy } from "./api-proxy";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | undefined;
@@ -73,10 +74,8 @@ function registerIpcHandlers(): void {
     return result.canceled ? null : result.filePath ?? null;
   });
 
-  ipcMain.handle("biostat:get-api-session", () => {
-    const session = requireSession();
-    return { apiBase: session.apiBase, token: session.token };
-  });
+  const requestApi = createAuthenticatedApiProxy(requireSession);
+  ipcMain.handle("biostat:request-api", (_event, request) => requestApi(request));
 }
 
 function messageFor(error: unknown): string {

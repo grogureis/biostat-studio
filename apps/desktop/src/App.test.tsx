@@ -11,6 +11,8 @@ import type { AnalysisPlan, AnalysisResult } from "./api/types";
 
 const plan: AnalysisPlan = {
   version: 1,
+  revision: "11111111-1111-4111-8111-111111111111",
+  digest: "a".repeat(64),
   items: [
     {
       id: "primary",
@@ -64,12 +66,27 @@ function deferred<T>() {
 function fakeApi(overrides: Partial<AnalysisApi> = {}): AnalysisApi {
   return {
     selectDataFile: vi.fn().mockResolvedValue("/Users/research/core-study.xlsx"),
+    profileData: vi.fn().mockResolvedValue({ rows: 12 }),
+    approveDataStructure: vi.fn().mockResolvedValue(undefined),
     createPlan: vi.fn().mockResolvedValue(plan),
+    approvePlan: vi.fn().mockResolvedValue(undefined),
     runAnalysis: vi.fn().mockResolvedValue([result]),
     cancelAnalysis: vi.fn().mockResolvedValue(undefined),
+    invalidateProject: vi.fn(),
     exportReport: vi.fn().mockResolvedValue("/Users/research/Results.docx"),
     ...overrides,
   };
+}
+
+async function openApprovedDataPlan(
+  user: ReturnType<typeof userEvent.setup>,
+  language: "en" | "tr" = "en",
+) {
+  await user.click(screen.getByRole("button", { name: language === "en" ? "Data & variables" : "Veri ve değişkenler" }));
+  await user.click(screen.getByRole("button", { name: language === "en" ? "Import Excel" : "Excel içe aktar" }));
+  await user.click(await screen.findByRole("button", { name: language === "en" ? "Approve data structure" : "Veri yapısını onayla" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: language === "en" ? "Data structure approved" : "Veri yapısı onaylandı" })).toBeDisabled());
+  await user.click(screen.getByRole("button", { name: language === "en" ? "Analysis plan" : "Analiz planı" }));
 }
 
 afterEach(() => {
@@ -85,7 +102,7 @@ describe("Clinical Calm workflow", () => {
     expect(screen.getAllByRole("button", { name: /^(Study brief|Data & variables|Analysis plan|Run & diagnose|Results review|Word report)$/ })).toHaveLength(6);
     expect(screen.getByText("Offline · data stays on this Mac")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     expect(screen.getByRole("heading", { name: "Analysis plan" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run analysis" })).toBeDisabled();
 
@@ -95,17 +112,22 @@ describe("Clinical Calm workflow", () => {
 
   it("announces progress and supports cancellation without presenting partial results", async () => {
     const pending = deferred<AnalysisResult[]>();
-    const api = fakeApi({ runAnalysis: vi.fn(() => pending.promise) });
+    const api = fakeApi({
+      runAnalysis: vi.fn((_plan, onProgress) => {
+        onProgress?.({ status: "running", progress: 35, message: "Running approved methods.", errorCode: null });
+        return pending.promise;
+      }),
+    });
     const user = userEvent.setup();
     render(<App api={api} />);
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
     await user.click(screen.getByRole("button", { name: "Run analysis" }));
 
     expect(screen.getByRole("heading", { name: "Run & diagnose" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Running approved analysis");
-    expect(screen.getByRole("progressbar", { name: "Analysis progress" })).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByRole("status")).toHaveTextContent("Running approved methods.");
+    expect(screen.getByRole("progressbar", { name: "Analysis progress" })).toHaveAttribute("aria-valuenow", "35");
 
     await user.click(screen.getByRole("button", { name: "Cancel analysis" }));
     expect(api.cancelAnalysis).toHaveBeenCalledOnce();
@@ -123,7 +145,7 @@ describe("Clinical Calm workflow", () => {
     const user = userEvent.setup();
     render(<App api={api} />);
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
     await user.click(screen.getByRole("button", { name: "Run analysis" }));
 
@@ -146,7 +168,7 @@ describe("Clinical Calm workflow", () => {
     expect(document.documentElement.lang).toBe("tr");
     expect(screen.getByRole("navigation", { name: "Analiz iş akışı" })).toBeInTheDocument();
     expect(screen.getByText("Çevrimdışı · veriler bu Mac'te kalır")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Analiz planı" }));
+    await openApprovedDataPlan(user, "tr");
     expect(await screen.findByText("Welch independent-samples t-test")).toBeInTheDocument();
     expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ language: "tr" }));
   });
@@ -156,7 +178,7 @@ describe("Clinical Calm workflow", () => {
     const user = userEvent.setup();
     render(<App api={api} />);
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
     await user.click(screen.getByRole("button", { name: "Run analysis" }));
     await screen.findByRole("heading", { name: "Results" });
@@ -186,7 +208,7 @@ describe("Clinical Calm workflow", () => {
     const user = userEvent.setup();
     render(<App api={api} />);
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     expect(await screen.findByRole("alert")).toHaveTextContent("Analysis plan could not be completed");
     expect(api.runAnalysis).not.toHaveBeenCalled();
 
@@ -202,7 +224,7 @@ describe("Clinical Calm workflow", () => {
     const user = userEvent.setup();
     render(<App api={api} />);
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
     await user.click(screen.getByRole("button", { name: "Run analysis" }));
 
@@ -221,7 +243,7 @@ describe("Clinical Calm workflow", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Interface language" }), "tr");
     expect(screen.getByText("YÖNTEM NOTU")).toBeInTheDocument();
     expect(screen.getByText("Yerel kullanım")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Analiz planı" }));
+    await openApprovedDataPlan(user, "tr");
     expect(await screen.findByRole("alert")).toHaveTextContent("Analiz planı tamamlanamadı");
     expect(screen.getByRole("button", { name: "Plan oluşturmayı yeniden dene" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Plan oluşturmayı yeniden dene" }));
@@ -243,7 +265,7 @@ describe("Clinical Calm workflow", () => {
     expect(screen.getByRole("button", { name: "Results review" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Word report" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Analysis plan" }));
+    await openApprovedDataPlan(user);
     await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
     await user.click(screen.getByRole("button", { name: "Run analysis" }));
     await screen.findByRole("heading", { name: "Results" });
@@ -265,5 +287,43 @@ describe("Clinical Calm workflow", () => {
     await user.click(screen.getByRole("button", { name: "Import Excel" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The workbook picker could not be opened");
     expect(screen.queryByText("picker unavailable")).not.toBeInTheDocument();
+  });
+
+  it("atomically clears plan approval results warnings and report readiness when the brief changes", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await openApprovedDataPlan(user);
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Run analysis" }));
+    await screen.findByRole("heading", { name: "Results" });
+    expect(screen.getByRole("heading", { name: "Warnings to review" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Study brief" }));
+    await user.type(screen.getByRole("textbox", { name: "Research question" }), " Updated");
+
+    expect(api.invalidateProject).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Results review" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Word report" })).toBeDisabled();
+    expect(screen.queryByRole("heading", { name: "Warnings to review" })).not.toBeInTheDocument();
+  });
+
+  it("atomically clears dependent analysis state when a new dataset is selected", async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi()} />);
+    await openApprovedDataPlan(user);
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Run analysis" }));
+    await screen.findByRole("heading", { name: "Results" });
+
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+    await user.click(screen.getByRole("button", { name: "Import Excel" }));
+
+    expect(screen.getByRole("button", { name: "Approve data structure" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Analysis plan" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Results review" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Word report" })).toBeDisabled();
+    expect(screen.queryByRole("heading", { name: "Warnings to review" })).not.toBeInTheDocument();
   });
 });
