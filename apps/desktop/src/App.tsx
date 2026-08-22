@@ -16,6 +16,20 @@ const labels = {
 
 const steps: WorkflowStep[] = ["study", "data", "plan", "run", "results", "report"];
 
+const diagnosticLabels = {
+  en: { separation: "separation", convergence: "convergence", estimation: "estimation", numeric: "numeric stability", analysis: "analysis", library: "statistical library" },
+  tr: { separation: "ayrışma", convergence: "yakınsama", estimation: "tahmin", numeric: "sayısal kararlılık", analysis: "analiz", library: "istatistik kütüphanesi" },
+} as const;
+
+function diagnosticDetail(error: AnalysisApiError, language: Language): string {
+  const labelsForLanguage = diagnosticLabels[language];
+  const categories = [...new Set(error.diagnostics.map(({ category }) => labelsForLanguage[category as keyof typeof labelsForLanguage]).filter(Boolean))];
+  if (categories.length === 0) return error.message;
+  return language === "en"
+    ? `Safe diagnostic category: ${categories.join(", ")}.`
+    : `Güvenli tanı kategorisi: ${categories.join(", ")}.`;
+}
+
 type FailedOperation = "plan" | "analysis" | "export";
 
 function ErrorBanner({ language, operation, detail, onRetry }: { language: Language; operation: FailedOperation; detail?: string | null; onRetry(): void }) {
@@ -32,6 +46,7 @@ export function App({ api }: { api: AnalysisApi }) {
   const [failedOperation, setFailedOperation] = useState<FailedOperation | null>(null);
   const [exporting, setExporting] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
+  const [reportLanguage, setReportLanguage] = useState<Language>("en");
   const [jobProgress, setJobProgress] = useState({ progress: 0, message: null as string | null });
   const [safeErrorDetail, setSafeErrorDetail] = useState<string | null>(null);
   const runId = useRef(0);
@@ -42,7 +57,7 @@ export function App({ api }: { api: AnalysisApi }) {
   const requestPlan = async () => {
     if (!project.dataApproved) return;
     setPlanning(true); setFailedOperation(null); setSafeErrorDetail(null); project.setPlanApproved(false);
-    try { project.setPlan(await api.createPlan({ ...project.brief, language: project.language })); }
+    try { project.setPlan(await api.createPlan({ ...project.brief, language: reportLanguage })); }
     catch { setFailedOperation("plan"); }
     finally { setPlanning(false); }
   };
@@ -67,7 +82,7 @@ export function App({ api }: { api: AnalysisApi }) {
     } catch (error) {
       if (runId.current === current) {
         setFailedOperation("analysis");
-        if (error instanceof AnalysisApiError) setSafeErrorDetail(error.message);
+        if (error instanceof AnalysisApiError) setSafeErrorDetail(diagnosticDetail(error, project.language));
       }
     } finally {
       if (runId.current === current) setRunning(false);
@@ -93,8 +108,18 @@ export function App({ api }: { api: AnalysisApi }) {
   };
 
   const changeLanguage = (next: Language) => {
-    invalidateTransientState();
     project.setLanguage(next);
+  };
+
+  const openProject = async () => {
+    if (!api.openProject) return;
+    const restored = await api.openProject();
+    if (!restored) return;
+    ++runId.current;
+    setRunning(false); setCancelled(false); setFailedOperation(null); setSafeErrorDetail(null);
+    setSavedPath(null); setJobProgress({ progress: 0, message: null });
+    project.restoreProject(restored);
+    setReportLanguage(restored.brief.language ?? "en");
   };
 
   const changeDataFile = (path: string | null) => {
@@ -102,8 +127,8 @@ export function App({ api }: { api: AnalysisApi }) {
     project.setDataFile(path);
   };
 
-  const approveData = async () => {
-    await api.approveDataStructure({ ...project.brief, language: project.language });
+  const approveData = async (roles: import("./api/types").VariableRole[]) => {
+    await api.approveDataStructure({ ...project.brief, language: reportLanguage }, roles);
     project.approveDataStructure();
   };
 
@@ -124,7 +149,7 @@ export function App({ api }: { api: AnalysisApi }) {
   const exportReport = async () => {
     if (project.results.length === 0) return;
     setExporting(true); setSavedPath(null); setFailedOperation(null);
-    try { setSavedPath(await api.exportReport(project.results, project.language)); }
+    try { setSavedPath(await api.exportReport(project.results, reportLanguage)); }
     catch { setFailedOperation("export"); }
     finally { setExporting(false); }
   };
@@ -143,15 +168,21 @@ export function App({ api }: { api: AnalysisApi }) {
 
   return <div className="app-shell">
     <a className="skip-link" href="#workspace">{text.skip}</a>
-    <aside className="workflow-rail"><div className="brand"><span aria-hidden="true">BS</span><strong>BioStat Studio</strong></div><p className="offline-pill"><span aria-hidden="true">●</span>{text.offline}</p><nav aria-label={text.navigation}><ol>{steps.map((step, index) => { const locked = (step === "plan" && !project.dataApproved) || (step === "run" && !project.planApproved) || ((step === "results" || step === "report") && !completedResults); return <li key={step}><button type="button" disabled={locked} aria-current={project.activeStep === step ? "step" : undefined} className={project.activeStep === step ? "active" : ""} onClick={() => goTo(step)}><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{text.stages[step]}</button></li>; })}</ol></nav><label className="language-control"><span>{text.language}</span><select aria-label={text.language} value={project.language} onChange={(event) => changeLanguage(event.target.value as Language)}><option value="en">English</option><option value="tr">Türkçe</option></select></label></aside>
+    <aside className="workflow-rail">
+      <div className="brand"><span aria-hidden="true">BS</span><strong>BioStat Studio</strong></div>
+      <button type="button" className="secondary-action" onClick={() => void openProject()}>{project.language === "en" ? "Open project" : "Proje aç"}</button>
+      <p className="offline-pill"><span aria-hidden="true">●</span>{text.offline}</p>
+      <nav aria-label={text.navigation}><ol>{steps.map((step, index) => { const locked = (step === "plan" && !project.dataApproved) || (step === "run" && !project.planApproved) || ((step === "results" || step === "report") && !completedResults); return <li key={step}><button type="button" disabled={locked} aria-current={project.activeStep === step ? "step" : undefined} className={project.activeStep === step ? "active" : ""} onClick={() => goTo(step)}><span aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>{text.stages[step]}</button></li>; })}</ol></nav>
+      <label className="language-control"><span>{text.language}</span><select aria-label={text.language} value={project.language} onChange={(event) => changeLanguage(event.target.value as Language)}><option value="en">English</option><option value="tr">Türkçe</option></select></label>
+    </aside>
     <main id="workspace" tabIndex={-1}>
       {failedOperation ? <ErrorBanner language={project.language} operation={failedOperation} detail={safeErrorDetail} onRetry={retryFailedOperation} /> : null}
       {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} language={project.language} /> : null}
-      {project.activeStep === "data" ? <DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} onFile={changeDataFile} onApproval={approveData} language={project.language} /> : null}
+      {project.activeStep === "data" ? <DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} onFile={changeDataFile} onApproval={approveData} language={project.language} /> : null}
       {project.activeStep === "plan" ? <PlanReview language={project.language} plan={project.plan} loading={planning} approved={project.planApproved} onApproval={(next) => void changePlanApproval(next)} onRun={() => void runAnalysis()} /> : null}
       {project.activeStep === "run" ? <section className="task-card run-card" aria-labelledby="run-title"><p className="eyebrow">{text.runEyebrow}</p><h1 id="run-title">{text.stages.run}</h1>{running ? <><p role="status" aria-live="polite">{jobProgress.message ?? text.running}</p><progress aria-label={text.progress} aria-valuenow={jobProgress.progress} value={jobProgress.progress} max={100}>{jobProgress.progress}%</progress><button type="button" className="secondary-action" onClick={() => void cancel()}>{text.cancel}</button></> : cancelled ? <p role="status">{text.cancelled}</p> : <p className="loading-note">{text.ready}</p>}</section> : null}
       {project.activeStep === "results" ? <ResultsReview language={project.language} results={project.results} /> : null}
-      {project.activeStep === "report" ? <ReportExport language={project.language} exporting={exporting} canExport={completedResults} savedPath={savedPath} onExport={() => void exportReport()} /> : null}
+      {project.activeStep === "report" ? <ReportExport language={project.language} reportLanguage={reportLanguage} exporting={exporting} canExport={completedResults} savedPath={savedPath} onReportLanguage={setReportLanguage} onExport={() => void exportReport()} /> : null}
     </main>
     <aside className="scientific-inspector" aria-label={text.inspector}><p className="eyebrow">{text.methodNote}</p><h2>{text.inspectorTitle}</h2><p>{text.inspectorText}</p><dl><div><dt>{text.mode}</dt><dd>{text.localOnly}</dd></div><div><dt>{text.auditTrail}</dt><dd>{text.enabled}</dd></div></dl>{inspectorWarnings.length > 0 ? <section className="inspector-warnings" aria-labelledby="inspector-warnings-title"><h3 id="inspector-warnings-title">{text.inspectorWarnings}</h3><ul>{inspectorWarnings.map((warning) => <li key={warning}><span aria-hidden="true">!</span>{warning}</li>)}</ul></section> : null}</aside>
   </div>;

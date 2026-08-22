@@ -86,12 +86,12 @@ describe("Electron lifecycle and renderer origin policy", () => {
       "requestApi",
     ]);
     await bridge.selectDataFile();
-    await bridge.selectProject();
+    await bridge.selectProject("open");
     await bridge.selectReportDestination();
     await bridge.requestApi({ path: "/v1/session", method: "GET" });
     expect(calls).toEqual([
       { channel: "biostat:select-data-file", payload: undefined },
-      { channel: "biostat:select-project", payload: undefined },
+      { channel: "biostat:select-project", payload: "open" },
       { channel: "biostat:select-report-destination", payload: undefined },
       { channel: "biostat:request-api", payload: { path: "/v1/session", method: "GET" } },
     ]);

@@ -48,6 +48,7 @@ export interface SidecarControllerDependencies {
 export interface SidecarController {
   startSidecar(): Promise<SidecarSession>;
   stopSidecar(): Promise<void>;
+  getSession(): SidecarSession | undefined;
 }
 
 export function parseReadiness(line: string): SidecarReadiness {
@@ -57,7 +58,7 @@ export function parseReadiness(line: string): SidecarReadiness {
       throw new Error("Invalid sidecar readiness");
     }
     const { port, api } = value as Record<string, unknown>;
-    if (!Number.isInteger(port) || Number(port) < 1 || api !== 1) {
+    if (!Number.isInteger(port) || Number(port) < 1 || Number(port) > 65_535 || api !== 1) {
       throw new Error("Invalid sidecar readiness");
     }
     return { port: Number(port), api: 1 };
@@ -281,10 +282,11 @@ export function createSidecarController(
     return pendingStart;
   };
 
-  return { startSidecar, stopSidecar };
+  return { startSidecar, stopSidecar, getSession: () => activeSession };
 }
 
 const controller = createSidecarController();
 
 export const startSidecar = controller.startSidecar;
 export const stopSidecar = controller.stopSidecar;
+export const getSidecarSession = controller.getSession;

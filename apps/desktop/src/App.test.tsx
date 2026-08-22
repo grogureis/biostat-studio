@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import type { AnalysisApi } from "./api/client";
+import { AnalysisApiError, type AnalysisApi } from "./api/client";
 import type { AnalysisPlan, AnalysisResult } from "./api/types";
 
 const plan: AnalysisPlan = {
@@ -66,7 +66,10 @@ function deferred<T>() {
 function fakeApi(overrides: Partial<AnalysisApi> = {}): AnalysisApi {
   return {
     selectDataFile: vi.fn().mockResolvedValue("/Users/research/core-study.xlsx"),
-    profileData: vi.fn().mockResolvedValue({ rows: 12 }),
+    profileData: vi.fn().mockResolvedValue({ rows: 12, columns: 2, missing_cells: 0, sheets: ["Sheet1"], selected_sheet: "Sheet1", variables: {
+      treatment: { display_name: "Treatment", kind: "binary", non_missing: 12, missing: 0, unique_values: 2 },
+      systolic_bp: { display_name: "Systolic bp", kind: "continuous", non_missing: 12, missing: 0, unique_values: 12 },
+    }, warnings: [] }),
     approveDataStructure: vi.fn().mockResolvedValue(undefined),
     createPlan: vi.fn().mockResolvedValue(plan),
     approvePlan: vi.fn().mockResolvedValue(undefined),
@@ -94,6 +97,24 @@ afterEach(() => {
 });
 
 describe("Clinical Calm workflow", () => {
+  it("shows only an allowlisted safe diagnostic category for a failed analysis", async () => {
+    const api = fakeApi({
+      runAnalysis: vi.fn().mockRejectedValue(new AnalysisApiError(
+        "analysis_execution_error",
+        "Analysis could not be completed.",
+        [{ category: "separation" }],
+      )),
+    });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await openApprovedDataPlan(user);
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Run analysis" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Safe diagnostic category: separation.");
+    expect(screen.queryByRole("heading", { name: "Results" })).not.toBeInTheDocument();
+  });
   it("presents six semantic stages and requires plan approval before analysis", async () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);
@@ -170,7 +191,8 @@ describe("Clinical Calm workflow", () => {
     expect(screen.getByText("Çevrimdışı · veriler bu Mac'te kalır")).toBeInTheDocument();
     await openApprovedDataPlan(user, "tr");
     expect(await screen.findByText("Welch independent-samples t-test")).toBeInTheDocument();
-    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ language: "tr" }));
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ language: "en" }));
+    expect(api.invalidateProject).not.toHaveBeenCalled();
   });
 
   it("exports the Word report through an explicit accessible action", async () => {

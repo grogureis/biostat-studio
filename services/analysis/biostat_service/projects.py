@@ -11,13 +11,14 @@ from pathlib import Path
 import re
 import tempfile
 from typing import Any, Mapping
+from uuid import UUID, uuid4
 
 from biostat_service.contracts import StudyBrief
 from biostat_service.data_intake import DataProfile, DataWarning, VariableMetadata
 from biostat_service.study_model import VERTICAL_SLICE_METHOD_IDS
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ARTIFACT_DIRECTORIES = (
     Path("artifacts"),
     Path("artifacts") / "figures",
@@ -179,6 +180,19 @@ def _json_value(value: Any) -> Any:
     raise TypeError(f"unsupported_metadata_type:{type(value).__name__}")
 
 
+def _decoded_json_value(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_decoded_json_value(item) for item in value]
+    if isinstance(value, dict):
+        value_type = value.get("type")
+        if value_type == "tuple" and set(value) == {"type", "items"}:
+            return tuple(_decoded_json_value(item) for item in value["items"])
+        if value_type in {"date", "datetime", "path"} and set(value) == {"type", "value"}:
+            return value["value"]
+        return {key: _decoded_json_value(item) for key, item in value.items()}
+    return value
+
+
 def _variable_manifest(metadata: VariableMetadata) -> dict[str, Any]:
     return {
         "source_label": _json_value(metadata.source_label),
@@ -251,6 +265,60 @@ def atomic_json_write(destination: Path, value: dict[str, Any]) -> None:
     _atomic_text_write(destination, _serialized_json(value, indent=2) + "\n")
 
 
+def _atomic_bytes_write(destination: Path, value: bytes) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(value)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def atomic_file_copy(source: Path, destination: Path) -> None:
+    """Copy a completed artifact without exposing a partial destination."""
+    source = Path(source)
+    if not source.is_file():
+        raise ValueError("artifact_source_missing")
+    _atomic_bytes_write(Path(destination), source.read_bytes())
+
+
+def _safe_relative_reference(root: Path, value: object) -> Path:
+    if not isinstance(value, str) or not value or Path(value).is_absolute():
+        raise ValueError("unsafe_project_reference")
+    relative = Path(value)
+    if any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("unsafe_project_reference")
+    resolved_root = root.resolve()
+    candidate = root / relative
+    if candidate.is_symlink():
+        raise ValueError("unsafe_project_reference")
+    try:
+        candidate.resolve(strict=False).relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("unsafe_project_reference") from exc
+    return candidate
+
+
+def _validate_relative_references(root: Path, value: object) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if key == "relative_path":
+                _safe_relative_reference(root, item)
+            else:
+                _validate_relative_references(root, item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _validate_relative_references(root, item)
+
+
 def _create_artifact_directories(root: Path) -> None:
     resolved_root = root.resolve()
     for relative_directory in ARTIFACT_DIRECTORIES:
@@ -267,15 +335,155 @@ def _create_artifact_directories(root: Path) -> None:
             raise ValueError("unsafe_artifact_path")
 
 
-def _load_existing_manifest(project: LocalProject, profile: DataProfile) -> None:
+def _read_manifest(project: LocalProject) -> dict[str, Any]:
     try:
         manifest = json.loads(project.manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("invalid_project_manifest") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("invalid_project_manifest")
+    return manifest
+
+
+def _load_existing_manifest(project: LocalProject, profile: DataProfile) -> None:
+    manifest = _read_manifest(project)
+    if manifest.get("schema_version") == 1:
+        _migrate_schema_one(project, manifest, profile)
+        return
     if manifest.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("unsupported_project_schema")
+    source = manifest.get("source")
+    if not isinstance(source, dict) or source.get("sha256") != profile.source_sha256:
+        raise ValueError("source_fingerprint_mismatch")
+
+
+def _migrate_schema_one(
+    project: LocalProject, manifest: Mapping[str, Any], profile: DataProfile
+) -> None:
+    """Migrate legacy state only with a freshly picker-approved source snapshot."""
     if manifest.get("source_sha256") != profile.source_sha256:
         raise ValueError("source_fingerprint_mismatch")
+    data_profile = manifest.get("data_profile")
+    decisions = manifest.get("decisions")
+    if not isinstance(data_profile, Mapping) or not isinstance(decisions, Mapping):
+        raise ValueError("invalid_project_manifest")
+    try:
+        brief = StudyBrief.model_validate(decisions["study_brief"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid_project_manifest") from exc
+    snapshot_relative = Path("source") / "source.xlsx"
+    snapshot = project.root / snapshot_relative
+    if snapshot.is_symlink():
+        raise ValueError("unsafe_source_snapshot_path")
+    _atomic_bytes_write(snapshot, profile.source_path.read_bytes())
+    migrated = {
+        "schema_version": SCHEMA_VERSION,
+        "project_id": str(uuid4()),
+        "source": {
+            "relative_path": snapshot_relative.as_posix(),
+            "sha256": profile.source_sha256,
+            "selected_sheet": profile.selected_sheet,
+        },
+        "data_profile": dict(data_profile),
+        "state": _initial_state(brief),
+    }
+    atomic_json_write(project.manifest_path, migrated)
+
+
+def _initial_state(brief: StudyBrief) -> dict[str, Any]:
+    return {
+        "study_brief": brief.model_dump(mode="json"),
+        "approved_roles": None,
+        "plan": None,
+        "terminal_jobs": {},
+        "reports": [],
+    }
+
+
+def load_project(root: Path) -> tuple[LocalProject, dict[str, Any]]:
+    """Load and validate a durable project without reading patient rows."""
+    project = LocalProject(Path(root))
+    manifest = _read_manifest(project)
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("unsupported_project_schema")
+    try:
+        UUID(str(manifest["project_id"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid_project_manifest") from exc
+    source = manifest.get("source")
+    state = manifest.get("state")
+    if not isinstance(source, dict) or not isinstance(state, dict):
+        raise ValueError("invalid_project_manifest")
+    source_path = _safe_relative_reference(project.root, source.get("relative_path"))
+    fingerprint = source.get("sha256")
+    if not isinstance(fingerprint, str) or not FINGERPRINT.fullmatch(fingerprint):
+        raise ValueError("invalid_project_manifest")
+    if not source_path.is_file():
+        raise ValueError("project_source_missing")
+    from biostat_service.data_intake import sha256_file
+
+    if sha256_file(source_path) != fingerprint:
+        raise ValueError("source_fingerprint_mismatch")
+    _validate_relative_references(project.root, manifest)
+    return project, manifest
+
+
+def profile_from_manifest(project: LocalProject, manifest: Mapping[str, Any]) -> DataProfile:
+    """Reconstruct structural metadata while keeping patient rows on disk."""
+    source = manifest.get("source")
+    profile = manifest.get("data_profile")
+    if not isinstance(source, Mapping) or not isinstance(profile, Mapping):
+        raise ValueError("invalid_project_manifest")
+    source_path = _safe_relative_reference(project.root, source.get("relative_path"))
+    variables_value = profile.get("variables")
+    warnings_value = profile.get("warnings")
+    if not isinstance(variables_value, Mapping) or not isinstance(warnings_value, list):
+        raise ValueError("invalid_project_manifest")
+    try:
+        variables = {
+            str(key): VariableMetadata(
+                source_label=_decoded_json_value(value["source_label"]),
+                original_name=str(value["original_name"]),
+                display_name=str(value["display_name"]),
+                kind=str(value["kind"]),
+                non_missing=int(value["non_missing"]),
+                missing=int(value["missing"]),
+                unique_values=int(value["unique_values"]),
+            )
+            for key, value in variables_value.items()
+        }
+        warnings = tuple(
+            DataWarning(
+                code=str(value["code"]),
+                column=None if value.get("column") is None else str(value["column"]),
+                message=str(value["message"]),
+            )
+            for value in warnings_value
+        )
+        return DataProfile(
+            source_path=source_path,
+            source_sha256=str(source["sha256"]),
+            sheets=tuple(str(item) for item in profile["sheets"]),
+            selected_sheet=str(source["selected_sheet"]),
+            rows=int(profile["rows"]),
+            columns=int(profile["columns"]),
+            missing_cells=int(profile["missing_cells"]),
+            variables=variables,
+            warnings=warnings,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("invalid_project_manifest") from exc
+
+
+def save_project_state(project: LocalProject, state: Mapping[str, Any]) -> None:
+    """Atomically replace only the durable workflow state after containment checks."""
+    manifest = _read_manifest(project)
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("unsupported_project_schema")
+    safe_state = _json_value(dict(state))
+    _validate_relative_references(project.root, safe_state)
+    manifest["state"] = safe_state
+    atomic_json_write(project.manifest_path, manifest)
 
 
 def create_project(root: Path, brief: StudyBrief, profile: DataProfile) -> LocalProject:
@@ -297,13 +505,21 @@ def create_project(root: Path, brief: StudyBrief, profile: DataProfile) -> Local
         raise ValueError("orphaned_audit_log")
     project.root.mkdir(parents=True, exist_ok=True)
     _create_artifact_directories(project.root)
+    snapshot_relative = Path("source") / "source.xlsx"
+    snapshot = project.root / snapshot_relative
+    if snapshot.exists() or snapshot.is_symlink():
+        raise ValueError("unsafe_source_snapshot_path")
+    _atomic_bytes_write(snapshot, profile.source_path.read_bytes())
     manifest = {
         "schema_version": SCHEMA_VERSION,
-        "source_path": str(profile.source_path.resolve()),
-        "source_sha256": profile.source_sha256,
+        "project_id": str(uuid4()),
+        "source": {
+            "relative_path": snapshot_relative.as_posix(),
+            "sha256": profile.source_sha256,
+            "selected_sheet": profile.selected_sheet,
+        },
         "data_profile": _profile_manifest(profile),
-        "decisions": {"study_brief": brief.model_dump(mode="json")},
-        "generated_artifacts": [],
+        "state": _initial_state(brief),
     }
     atomic_json_write(project.manifest_path, manifest)
     _atomic_text_write(project.audit_path, "")

@@ -41,6 +41,12 @@ describe("parseReadiness", () => {
     );
   });
 
+  it("rejects ports outside the TCP range", () => {
+    expect(() => parseReadiness('{"port":65536,"api":1}')).toThrow(
+      "Invalid sidecar readiness",
+    );
+  });
+
   it("waits for SIGKILL child exit before rejecting timed-out startup", async () => {
     vi.useFakeTimers();
     const child = new ControlledChild();
@@ -103,8 +109,10 @@ describe("parseReadiness", () => {
     const firstStart = controller.startSidecar();
     firstChild.stdout.write('{"port":43117,"api":1}\n');
     const firstSession = await firstStart;
+    expect(controller.getSession()).toEqual(firstSession);
 
     firstChild.exit(1);
+    expect(controller.getSession()).toBeUndefined();
     const secondStart = controller.startSidecar();
     expect(spawnCount).toBe(2);
     secondChild.stdout.write('{"port":43118,"api":1}\n');

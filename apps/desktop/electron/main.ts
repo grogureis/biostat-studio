@@ -1,14 +1,17 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { createApplicationLifecycle } from "./lifecycle.js";
 import { allowsRendererNavigation, requireLocalDevelopmentUrl } from "./renderer-security.js";
-import { startSidecar, stopSidecar, type SidecarSession } from "./sidecar.js";
+import { getSidecarSession, startSidecar, stopSidecar, type SidecarSession } from "./sidecar.js";
 import { createAuthenticatedApiProxy } from "./api-proxy.js";
+import { createPathCapabilityStore } from "./path-capabilities.js";
+import { assertTrustedIpcSender } from "./ipc-security.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | undefined;
-let sidecarSession: SidecarSession | undefined;
+const pathCapabilities = createPathCapabilityStore(randomUUID);
 
 function rendererUrl(): string {
   const developmentUrl = process.env.VITE_DEV_SERVER_URL;
@@ -44,38 +47,57 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
-function requireSession(): SidecarSession {
-  if (!sidecarSession) {
-    throw new Error("The local analysis service is unavailable");
-  }
-  return sidecarSession;
+async function requireSession(): Promise<SidecarSession> {
+  return getSidecarSession() ?? startSidecar();
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle("biostat:select-data-file", async () => {
+  const trusted = (event: Electron.IpcMainInvokeEvent): void => {
+    if (!mainWindow) throw new Error("The application window is unavailable");
+    assertTrustedIpcSender(event, mainWindow.webContents);
+  };
+  ipcMain.handle("biostat:select-data-file", async (event) => {
+    trusted(event);
     const result = await dialog.showOpenDialog(mainWindow!, {
       properties: ["openFile"],
-      filters: [{ name: "Data files", extensions: ["xlsx", "xls", "csv", "sav"] }],
+      filters: [{ name: "Excel workbook", extensions: ["xlsx"] }],
     });
-    return result.canceled ? null : result.filePaths[0] ?? null;
+    const path = result.filePaths[0];
+    if (result.canceled || !path) return null;
+    return {
+      displayName: basename(path),
+      profileCapability: pathCapabilities.issue("data-profile", path, basename(path)).id,
+      importCapability: pathCapabilities.issue("data-import", path, basename(path)).id,
+    };
   });
 
-  ipcMain.handle("biostat:select-project", async () => {
+  ipcMain.handle("biostat:select-project", async (event, mode: unknown) => {
+    trusted(event);
+    if (mode !== "create" && mode !== "open") throw new Error("Invalid project picker mode");
     const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: ["openDirectory", "createDirectory"],
+      properties: mode === "create" ? ["openDirectory", "createDirectory"] : ["openDirectory"],
     });
-    return result.canceled ? null : result.filePaths[0] ?? null;
+    const path = result.filePaths[0];
+    return result.canceled || !path
+      ? null
+      : pathCapabilities.issue(mode === "create" ? "project-create" : "project-open", path, basename(path));
   });
 
-  ipcMain.handle("biostat:select-report-destination", async () => {
+  ipcMain.handle("biostat:select-report-destination", async (event) => {
+    trusted(event);
     const result = await dialog.showSaveDialog(mainWindow!, {
       filters: [{ name: "Word document", extensions: ["docx"] }],
     });
-    return result.canceled ? null : result.filePath ?? null;
+    return result.canceled || !result.filePath
+      ? null
+      : pathCapabilities.issue("report-save", result.filePath, basename(result.filePath));
   });
 
-  const requestApi = createAuthenticatedApiProxy(requireSession);
-  ipcMain.handle("biostat:request-api", (_event, request) => requestApi(request));
+  const requestApi = createAuthenticatedApiProxy(requireSession, fetch, pathCapabilities);
+  ipcMain.handle("biostat:request-api", (event, request) => {
+    trusted(event);
+    return requestApi(request);
+  });
 }
 
 function messageFor(error: unknown): string {
@@ -84,7 +106,7 @@ function messageFor(error: unknown): string {
 
 const lifecycle = createApplicationLifecycle({
   startSidecar: async () => {
-    sidecarSession = await startSidecar();
+    await startSidecar();
     registerIpcHandlers();
   },
   stopSidecar,

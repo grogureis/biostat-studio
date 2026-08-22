@@ -127,6 +127,20 @@ def test_profile_excel_preserves_raw_numeric_headers_with_json_safe_lookup(tmp_p
     )
 
 
+def test_profile_excel_escapes_literal_typed_header_key_collisions(tmp_path: Path) -> None:
+    workbook = write_workbook(
+        tmp_path / "typed-header-collision.xlsx",
+        [2026, "int:2026"],
+        [[1, "A"], [2, "B"]],
+    )
+
+    profile = profile_excel(workbook)
+
+    assert set(profile.variables) == {"int:2026", "str:int:2026"}
+    assert profile.variables["int:2026"].source_label == 2026
+    assert profile.variables["str:int:2026"].source_label == "int:2026"
+
+
 def test_profile_excel_rejects_unknown_sheet_without_changing_source(core_workbook: Path) -> None:
     """An invalid sheet selection must not fall back silently or alter the workbook."""
     before = file_sha256(core_workbook)

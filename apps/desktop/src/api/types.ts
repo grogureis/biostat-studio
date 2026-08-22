@@ -26,6 +26,24 @@ export interface VariableRole {
   confirmed: boolean;
 }
 
+export interface VariableProfile {
+  display_name: string;
+  kind: string;
+  non_missing: number;
+  missing: number;
+  unique_values: number;
+}
+
+export interface DataProfile {
+  sheets: string[];
+  selected_sheet: string;
+  rows: number;
+  columns: number;
+  missing_cells: number;
+  variables: Record<string, VariableProfile>;
+  warnings: Array<{ code: string; column: string | null; message: string }>;
+}
+
 export interface PlanItem {
   id: string;
   estimand: string;

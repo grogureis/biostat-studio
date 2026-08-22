@@ -1,15 +1,26 @@
-import type { AnalysisPlan, AnalysisResult, Language, StudyBrief } from "./types";
+import type { AnalysisPlan, AnalysisResult, DataProfile, Language, StudyBrief, VariableRole } from "./types";
 
 export interface AnalysisApi {
+  openProject?(): Promise<OpenProjectSnapshot | null>;
   selectDataFile(): Promise<string | null>;
-  profileData?(): Promise<{ rows: number }>;
-  approveDataStructure(brief: StudyBrief): Promise<void>;
+  profileData?(): Promise<DataProfile>;
+  approveDataStructure(brief: StudyBrief, roles?: VariableRole[]): Promise<void>;
   createPlan(brief: StudyBrief): Promise<AnalysisPlan>;
   approvePlan(plan: AnalysisPlan): Promise<void>;
   runAnalysis(plan: AnalysisPlan, onProgress?: (progress: JobProgress) => void): Promise<AnalysisResult[]>;
   cancelAnalysis(): Promise<void>;
   invalidateProject(): void;
   exportReport(results: AnalysisResult[], language: Language): Promise<string | null>;
+}
+
+export interface OpenProjectSnapshot {
+  id: string;
+  brief: StudyBrief;
+  roles: VariableRole[];
+  plan: AnalysisPlan | null;
+  approved_plan: boolean;
+  completed_job_id: string | null;
+  results: AnalysisResult[];
 }
 
 export interface JobProgress {
@@ -20,7 +31,11 @@ export interface JobProgress {
 }
 
 export class AnalysisApiError extends Error {
-  constructor(public readonly code: string, message: string) {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly diagnostics: ReadonlyArray<{ category: string }> = [],
+  ) {
     super(message);
     this.name = "AnalysisApiError";
   }
@@ -28,7 +43,7 @@ export class AnalysisApiError extends Error {
 
 type BiostatWindowBridge = Pick<
   Window["biostat"],
-  "selectDataFile" | "selectReportDestination" | "requestApi"
+  "selectDataFile" | "selectProject" | "selectReportDestination" | "requestApi"
 >;
 
 interface JobResponse {
@@ -38,9 +53,20 @@ interface JobResponse {
   progress: number;
   error_code: string | null;
   message: string | null;
+  diagnostics?: Array<{ category?: unknown; code?: unknown }>;
 }
 
 const safeError = (): Error => new Error("The local analysis service could not complete this operation.");
+const SAFE_DIAGNOSTIC_CATEGORIES = new Set(["separation", "convergence", "estimation", "numeric", "analysis", "library"]);
+
+function safeDiagnostics(value: JobResponse["diagnostics"]): Array<{ category: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => (
+    item && typeof item.category === "string" && SAFE_DIAGNOSTIC_CATEGORIES.has(item.category)
+      ? [{ category: item.category }]
+      : []
+  ));
+}
 
 function responseError(body: unknown): AnalysisApiError {
   if (body && typeof body === "object") {
@@ -61,10 +87,11 @@ function responseError(body: unknown): AnalysisApiError {
 
 /** Renderer-safe authenticated boundary for the local loopback service. */
 export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
-  let dataFile: string | null = null;
+  let dataFile: Awaited<ReturnType<BiostatWindowBridge["selectDataFile"]>> = null;
   let projectId: string | null = null;
   let activeJobId: string | null = null;
   let completedJobId: string | null = null;
+  let activeTerminal: Promise<JobResponse> | null = null;
 
   const send = async <T>(path: string, body?: unknown): Promise<T> => {
     const response = await bridge.requestApi({
@@ -84,28 +111,70 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
   const invalidateProject = (): void => {
     const jobId = activeJobId;
     projectId = null;
-    activeJobId = null;
     completedJobId = null;
     if (jobId) {
       void send<JobResponse>(`/v1/jobs/${jobId}/cancel`, {}).catch(() => undefined);
     }
   };
 
+  const waitForTerminal = (jobId: string, onProgress?: (progress: JobProgress) => void): Promise<JobResponse> => {
+    return (async () => {
+      let consecutiveFailures = 0;
+      for (let attempts = 0; attempts < 900; attempts += 1) {
+        try {
+          const job = await send<JobResponse>(`/v1/jobs/${jobId}`);
+          consecutiveFailures = 0;
+          onProgress?.({
+            status: job.status,
+            progress: job.progress ?? 0,
+            message: job.message ?? null,
+            errorCode: job.error_code ?? null,
+          });
+          if (["completed", "failed", "cancelled"].includes(job.status)) return job;
+        } catch (error) {
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= 5) throw error;
+        }
+        const delay = Math.min(100 * (2 ** Math.min(consecutiveFailures, 4)), 2_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
+      throw new AnalysisApiError("analysis_timeout", "The local analysis service did not reach a terminal state in time.");
+    })();
+  };
+
   return Object.freeze({
+    openProject: async () => {
+      invalidateProject();
+      const selection = await bridge.selectProject("open");
+      if (!selection) return null;
+      const restored = await send<OpenProjectSnapshot>("/v1/projects/open", {
+        project_capability: selection.id,
+      });
+      projectId = restored.id;
+      completedJobId = restored.completed_job_id;
+      dataFile = null;
+      return restored;
+    },
     selectDataFile: async () => {
       invalidateProject();
       dataFile = await bridge.selectDataFile();
-      return dataFile;
+      return dataFile?.displayName ?? null;
     },
     profileData: async () => {
       if (!dataFile) throw safeError();
-      return send<{ rows: number }>("/v1/data/profile", { source_path: dataFile });
+      return send<DataProfile>("/v1/data/profile", { source_capability: dataFile.profileCapability });
     },
-    approveDataStructure: async (brief: StudyBrief) => {
+    approveDataStructure: async (brief: StudyBrief, roles: VariableRole[] = []) => {
       if (!dataFile) throw safeError();
-      const project = await send<{ id: string }>("/v1/projects", { source_path: dataFile, brief });
+      const projectDirectory = await bridge.selectProject("create");
+      if (!projectDirectory) throw new AnalysisApiError("project_selection_cancelled", "A project folder is required to continue.");
+      const project = await send<{ id: string }>("/v1/projects", {
+        source_capability: dataFile.importCapability,
+        project_capability: projectDirectory.id,
+        brief,
+      });
       projectId = project.id;
-      await send<{ approved: boolean }>(`/v1/projects/${project.id}/data-approval`, {});
+      await send<{ approved: boolean }>(`/v1/projects/${project.id}/data-approval`, { roles });
     },
     createPlan: async (_brief: StudyBrief) => {
       return send<AnalysisPlan>("/v1/plans", { project_id: requireProject() });
@@ -123,36 +192,36 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
       });
       activeJobId = queued.id;
       completedJobId = null;
-      for (let attempts = 0; attempts < 120; attempts += 1) {
-        const job = await send<JobResponse>(`/v1/jobs/${queued.id}`);
-        onProgress?.({
-          status: job.status,
-          progress: job.progress ?? 0,
-          message: job.message ?? null,
-          errorCode: job.error_code ?? null,
-        });
+      activeTerminal = waitForTerminal(queued.id, onProgress);
+      try {
+        const job = await activeTerminal;
         if (job.status === "completed") {
-          activeJobId = null;
           completedJobId = queued.id;
           return job.result?.results ?? [];
         }
-        if (job.status === "failed" || job.status === "cancelled") {
-          activeJobId = null;
-          throw new AnalysisApiError(
-            job.error_code ?? job.status,
-            job.message ?? "The local analysis service could not complete this operation.",
-          );
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        throw new AnalysisApiError(
+          job.error_code ?? job.status,
+          job.message ?? "The local analysis service could not complete this operation.",
+          safeDiagnostics(job.diagnostics),
+        );
+      } finally {
+        if (activeJobId === queued.id) activeJobId = null;
+        activeTerminal = null;
       }
-      activeJobId = null;
-      throw new AnalysisApiError("analysis_timeout", "The local analysis service did not respond in time.");
     },
     cancelAnalysis: async () => {
       if (!activeJobId) return;
       const jobId = activeJobId;
-      activeJobId = null;
       await send<JobResponse>(`/v1/jobs/${jobId}/cancel`, {});
+      if (activeTerminal) {
+        await activeTerminal;
+      } else {
+        const terminal = await waitForTerminal(jobId);
+        if (!["completed", "failed", "cancelled"].includes(terminal.status)) {
+          throw new AnalysisApiError("cancellation_failed", "Cancellation did not reach a terminal state.");
+        }
+        if (activeJobId === jobId) activeJobId = null;
+      }
     },
     invalidateProject,
     exportReport: async (_results: AnalysisResult[], language: Language) => {
@@ -161,7 +230,7 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
       const jobId = completedJobId;
       if (!jobId) throw safeError();
       const exported = await send<{ saved: boolean; filename: string }>("/v1/reports", {
-        project_id: requireProject(), job_id: jobId, language, destination,
+        project_id: requireProject(), job_id: jobId, language, destination_capability: destination.id,
       });
       return exported.saved ? exported.filename : null;
     },

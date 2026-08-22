@@ -2,6 +2,12 @@
 
 BioStat Studio is an offline-first Apple Silicon macOS application for a guided biostatistics workflow: Excel intake, study-brief capture, data-structure and analysis-plan approval, local analysis, and bilingual Word results export.
 
+## Verified vertical-slice scope
+
+The current application accepts `.xlsx` workbooks and implements descriptive summaries, Welch independent-samples and paired t tests, Mann–Whitney U and Wilcoxon signed-rank tests, Welch ANOVA and Kruskal–Wallis tests, chi-square/Fisher testing, Pearson/Spearman correlation, and linear and logistic regression. The guided planner selects only from this verified set, records assumptions and provenance, and requires explicit data-role and immutable-plan approval before execution.
+
+CSV and SAV importers are future adapters. Advanced statistics, machine learning, validated prediction-model development, and causal-inference workflows are also future work; the current release does not claim those capabilities.
+
 ## Clean checkout and local development
 
 The repository uses only local dependencies. From a clean checkout, install the locked Node workspace packages and create the repository-local Python environment:

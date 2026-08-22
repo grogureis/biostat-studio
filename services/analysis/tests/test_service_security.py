@@ -1,9 +1,12 @@
 import json
 import os
+import selectors
 import subprocess
 import sys
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +20,18 @@ def client(monkeypatch):
     monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
     with TestClient(create_app()) as test_client:
         yield test_client
+
+
+def _approved_roles(created: dict) -> list[dict]:
+    return [
+        {
+            "name": name,
+            "role": "exposure" if name == "group" else "outcome",
+            "kind": metadata["kind"],
+            "confirmed": True,
+        }
+        for name, metadata in created["profile"]["variables"].items()
+    ]
 
 
 def test_health_is_available_on_loopback(client):
@@ -120,8 +135,17 @@ def test_planning_requires_an_audited_data_structure_approval(client, tmp_path: 
     assert blocked.status_code == 409
     assert blocked.json() == {"detail": "data_structure_approval_required"}
 
-    approved = client.post(
+    implicit = client.post(
         f"/v1/projects/{project_id}/data-approval", headers=headers, json={}
+    )
+    assert implicit.status_code == 422
+    assert implicit.json() == {"detail": "explicit_variable_snapshot_required"}
+    approved = client.post(
+        f"/v1/projects/{project_id}/data-approval", headers=headers,
+        json={"roles": [
+            {"name": name, "role": "exposure" if name == "group" else "outcome", "kind": metadata["kind"], "confirmed": True}
+            for name, metadata in created.json()["profile"]["variables"].items()
+        ]},
     )
     assert approved.json() == {"approved": True}
     assert set(context.approved_roles) == {"group", "outcome"}
@@ -152,7 +176,7 @@ def test_new_plan_revision_invalidates_approval_and_rejects_stale_execution(clie
         json={"source_path": str(workbook_path), "project_root": str(tmp_path / "revision.biostat"), "brief": brief},
     ).json()
     project_id = created["id"]
-    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={})
+    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": _approved_roles(created)})
     first = client.post("/v1/plans", headers=headers, json={"project_id": project_id}).json()
     assert first["revision"]
     assert len(first["digest"]) == 64
@@ -226,11 +250,12 @@ def test_report_uses_the_immutable_output_of_the_requested_job(client, tmp_path:
         "outcome_variables": ["outcome"],
         "exposure_variables": ["group"],
     }
-    project_id = client.post(
+    created = client.post(
         "/v1/projects", headers=headers,
         json={"source_path": str(workbook_path), "project_root": str(tmp_path / "two-jobs.biostat"), "brief": brief},
-    ).json()["id"]
-    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={})
+    ).json()
+    project_id = created["id"]
+    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": _approved_roles(created)})
 
     def run_latest_plan():
         plan = client.post("/v1/plans", headers=headers, json={"project_id": project_id}).json()
@@ -271,6 +296,90 @@ def test_report_uses_the_immutable_output_of_the_requested_job(client, tmp_path:
     assert exported_bundles[0] is first_bundle
 
 
+def test_same_completed_job_builds_language_specific_figures_for_en_and_tr_exports(
+    client, tmp_path: Path, monkeypatch
+):
+    workbook_path = tmp_path / "bilingual.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    for index in range(12):
+        workbook.active.append(["control" if index < 6 else "treated", index + 1])
+    workbook.save(workbook_path)
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {"title": "Bilingual", "question": "Is the outcome different between groups?", "hypothesis": "Groups differ.", "design": "cohort", "outcome_variables": ["outcome"], "exposure_variables": ["group"]}
+    created = client.post("/v1/projects", headers=headers, json={"source_path": str(workbook_path), "project_root": str(tmp_path / "bilingual.biostat"), "brief": brief}).json()
+    project_id = created["id"]
+    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": _approved_roles(created)})
+    plan = client.post("/v1/plans", headers=headers, json={"project_id": project_id}).json()
+    client.post("/v1/plans/approval", headers=headers, json={"project_id": project_id, "revision": plan["revision"], "digest": plan["digest"]})
+    job = client.post("/v1/jobs", headers=headers, json={"project_id": project_id, "approved_plan_revision": plan["revision"], "approved_plan_digest": plan["digest"]}).json()
+    client.app.state.job_manager.wait(UUID(job["id"]), timeout=5)
+
+    built_languages = []
+    exported = []
+    def language_figures(_frame, _plan, _bundle, output_dir, language):
+        built_languages.append(language)
+        Path(output_dir).mkdir(parents=True)
+        png = Path(output_dir) / f"figure-{language}.png"
+        png.write_bytes(b"png")
+        return [SimpleNamespace(id="figure", png_path=png, svg_path=None, caption=f"caption-{language}", alt_text=f"axis-{language}", dpi=300, width_inches=6.5, height_inches=4.2)]
+    def capture_report(_project, _brief, _plan, bundle, figures, language, destination):
+        exported.append((bundle.model_dump(mode="json"), figures[0].caption, figures[0].alt_text, language))
+        Path(destination).write_bytes(language.encode())
+    monkeypatch.setattr("biostat_service.app.build_figures", language_figures)
+    monkeypatch.setattr("biostat_service.app.build_results_docx", capture_report)
+
+    for language in ("en", "tr"):
+        response = client.post("/v1/reports", headers=headers, json={"project_id": project_id, "job_id": job["id"], "language": language, "destination": str(tmp_path / f"result-{language}.docx")})
+        assert response.status_code == 200
+
+    assert built_languages == ["en", "tr"]
+    assert exported[0][0] == exported[1][0]
+    assert exported[0][1:] == ("caption-en", "axis-en", "en")
+    assert exported[1][1:] == ("caption-tr", "axis-tr", "tr")
+
+
+def test_failed_analysis_persists_only_safe_diagnostics_and_terminal_audit(
+    client, tmp_path: Path, monkeypatch
+) -> None:
+    workbook_path = tmp_path / "failure.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    workbook.active.append(["control", 1])
+    workbook.active.append(["treated", 2])
+    workbook.save(workbook_path)
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {"title": "Failure", "question": "Do groups differ?", "hypothesis": "Groups differ.", "design": "cohort", "outcome_variables": ["outcome"], "exposure_variables": ["group"]}
+    root = tmp_path / "failure.biostat"
+    created = client.post("/v1/projects", headers=headers, json={"source_path": str(workbook_path), "project_root": str(root), "brief": brief}).json()
+    project_id = created["id"]
+    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": _approved_roles(created)})
+    plan = client.post("/v1/plans", headers=headers, json={"project_id": project_id}).json()
+    client.post("/v1/plans/approval", headers=headers, json={"project_id": project_id, "revision": plan["revision"], "digest": plan["digest"]})
+
+    def fail_without_leaking(_frame, _plan):
+        raise RuntimeError("patient-001 /private/clinic/source.xlsx")
+
+    monkeypatch.setattr("biostat_service.app.run_plan", fail_without_leaking)
+    queued = client.post("/v1/jobs", headers=headers, json={"project_id": project_id, "approved_plan_revision": plan["revision"], "approved_plan_digest": plan["digest"]}).json()
+    final = client.app.state.job_manager.wait(UUID(queued["id"]), timeout=5)
+
+    assert final.status == "failed"
+    assert final.result is None
+    assert final.diagnostics == ({"category": "library", "code": "library_failure"},)
+    assert "patient-001" not in repr(final)
+    manifest_text = (root / "project.json").read_text(encoding="utf-8")
+    audit_text = (root / "audit.jsonl").read_text(encoding="utf-8")
+    audit_events = [json.loads(line) for line in audit_text.splitlines()]
+    assert audit_events[-1]["type"] == "analysis_failed"
+    assert audit_events[-1]["status"] == "failed"
+    assert "patient-001" not in manifest_text + audit_text
+    assert "/private/clinic" not in manifest_text + audit_text
+    report = client.post("/v1/reports", headers=headers, json={"project_id": project_id, "job_id": queued["id"], "language": "en", "destination": str(tmp_path / "must-not-exist.docx")})
+    assert report.status_code == 409
+    assert not (tmp_path / "must-not-exist.docx").exists()
+
+
 def test_cancelled_pipeline_cleans_staging_and_never_becomes_reportable(client, tmp_path: Path, monkeypatch):
     workbook_path = tmp_path / "cancel.xlsx"
     workbook = Workbook()
@@ -288,11 +397,12 @@ def test_cancelled_pipeline_cleans_staging_and_never_becomes_reportable(client, 
         "exposure_variables": ["group"],
     }
     root = tmp_path / "cancel.biostat"
-    project_id = client.post(
+    created = client.post(
         "/v1/projects", headers=headers,
         json={"source_path": str(workbook_path), "project_root": str(root), "brief": brief},
-    ).json()["id"]
-    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={})
+    ).json()
+    project_id = created["id"]
+    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": _approved_roles(created)})
     plan = client.post("/v1/plans", headers=headers, json={"project_id": project_id}).json()
     client.post(
         "/v1/plans/approval", headers=headers,
@@ -325,6 +435,7 @@ def test_cancelled_pipeline_cleans_staging_and_never_becomes_reportable(client, 
     assert state["status"] == "cancelled"
     assert state["result"] is None
     assert '"type": "analysis_completed"' not in (root / "audit.jsonl").read_text(encoding="utf-8")
+    assert '"type": "analysis_cancelled"' in (root / "audit.jsonl").read_text(encoding="utf-8")
     assert not list((root / "artifacts").glob(".staging-*"))
     assert next(iter(client.app.state.projects.values())).job_outputs == {}
     report = client.post(
@@ -369,7 +480,7 @@ def test_authenticated_project_plan_job_and_report_routes_keep_values_out_of_res
     assert str(workbook_path) not in created.text
 
     approved_data = client.post(
-        f"/v1/projects/{payload['id']}/data-approval", headers=headers, json={}
+        f"/v1/projects/{payload['id']}/data-approval", headers=headers, json={"roles": _approved_roles(payload)}
     )
     assert approved_data.status_code == 200
 
@@ -423,6 +534,85 @@ def test_authenticated_project_plan_job_and_report_routes_keep_values_out_of_res
     assert destination.exists()
 
 
+def test_restart_open_reconstructs_completed_job_without_patient_rows_in_manifest(
+    tmp_path: Path, monkeypatch
+):
+    workbook_path = tmp_path / "restart.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    for index in range(12):
+        workbook.active.append(["private-control" if index < 6 else "private-treated", index + 1])
+    workbook.save(workbook_path)
+    root = tmp_path / "restart.biostat"
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {
+        "title": "Restart-safe study",
+        "question": "Is the outcome different between groups?",
+        "hypothesis": "The groups have different outcomes.",
+        "design": "cohort",
+        "outcome_variables": ["outcome"],
+        "exposure_variables": ["group"],
+    }
+
+    with TestClient(create_app()) as first:
+        created = first.post(
+            "/v1/projects", headers=headers,
+            json={"source_path": str(workbook_path), "project_root": str(root), "brief": brief},
+        ).json()
+        project_id = created["id"]
+        roles = [
+            {"name": "group", "role": "exposure", "kind": created["profile"]["variables"]["group"]["kind"], "confirmed": True},
+            {"name": "outcome", "role": "outcome", "kind": created["profile"]["variables"]["outcome"]["kind"], "confirmed": True},
+        ]
+        assert first.post(
+            f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": roles}
+        ).status_code == 200
+        plan = first.post("/v1/plans", headers=headers, json={"project_id": project_id}).json()
+        approved_plan = first.post(
+            "/v1/plans/approval", headers=headers,
+            json={"project_id": project_id, "revision": plan["revision"], "digest": plan["digest"]},
+        )
+        assert approved_plan.status_code == 200, approved_plan.text
+        queued = first.post(
+            "/v1/jobs", headers=headers,
+            json={"project_id": project_id, "approved_plan_revision": plan["revision"], "approved_plan_digest": plan["digest"]},
+        )
+        assert queued.status_code == 200, queued.text
+        queued = queued.json()
+        first.app.state.job_manager.wait(UUID(queued["id"]), timeout=5)
+
+    manifest_text = (root / "project.json").read_text(encoding="utf-8")
+    assert str(workbook_path.resolve()) not in manifest_text
+    assert "private-control" not in manifest_text
+    assert "private-treated" not in manifest_text
+
+    exported = []
+    def capture_report(_project, _brief, _plan, bundle, figures, language, destination):
+        exported.append((bundle, figures, language))
+        Path(destination).write_bytes(b"reopened report")
+
+    monkeypatch.setattr("biostat_service.app.build_results_docx", capture_report)
+    with TestClient(create_app()) as restarted:
+        opened = restarted.post(
+            "/v1/projects/open", headers=headers, json={"project_root": str(root)}
+        )
+        assert opened.status_code == 200
+        payload = opened.json()
+        assert payload["id"] == project_id
+        assert payload["approved_plan"] is True
+        assert payload["completed_job_id"] == queued["id"]
+        assert payload["results"]
+
+        destination = tmp_path / "reopened.docx"
+        report = restarted.post(
+            "/v1/reports", headers=headers,
+            json={"project_id": project_id, "job_id": queued["id"], "language": "en", "destination": str(destination)},
+        )
+        assert report.status_code == 200
+        assert destination.read_bytes() == b"reopened report"
+        assert exported[0][2] == "en"
+
+
 def test_v1_rejects_non_loopback_client(monkeypatch):
     monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
     with TestClient(create_app(), client=("192.0.2.1", 5000)) as remote_client:
@@ -444,11 +634,32 @@ def test_launcher_emits_only_port_and_api_readiness():
     )
     try:
         assert process.stdout is not None
-        readiness = json.loads(process.stdout.readline())
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        if not selector.select(timeout=10):
+            process.kill()
+            process.wait(timeout=5)
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            if "operation not permitted" in stderr.lower():
+                pytest.skip("host sandbox does not permit a loopback listener")
+            pytest.fail("launcher did not emit readiness within 10 seconds")
+        line = process.stdout.readline()
+        if not line:
+            process.wait(timeout=5)
+            stderr = process.stderr.read() if process.stderr is not None else ""
+            if "operation not permitted" in stderr.lower():
+                pytest.skip("host sandbox does not permit a loopback listener")
+            pytest.fail("launcher exited before readiness")
+        readiness = json.loads(line)
         assert readiness.keys() == {"port", "api"}
         assert isinstance(readiness["port"], int)
         assert readiness["port"] > 0
         assert readiness["api"] == 1
     finally:
-        process.terminate()
-        process.wait(timeout=5)
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)

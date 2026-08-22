@@ -11,7 +11,12 @@ import pytest
 
 from biostat_service.contracts import StudyBrief
 from biostat_service.data_intake import DataProfile, VariableMetadata, profile_excel
-from biostat_service.projects import append_audit_event, create_project
+from biostat_service.projects import (
+    append_audit_event,
+    create_project,
+    load_project,
+    save_project_state,
+)
 
 
 def _source_workbook(path: Path, headers: list[object]) -> Path:
@@ -40,7 +45,7 @@ def brief() -> StudyBrief:
 def test_project_manifest_references_source_and_records_audit_event(
     tmp_path: Path, brief: StudyBrief
 ) -> None:
-    """Copying or exposing source rows would violate the local-data boundary."""
+    """The manifest and audit must never expose source rows or the original path."""
     source = _source_workbook(tmp_path / "cardio.xlsx", ["patient_id", 2026])
     before = sha256(source.read_bytes()).hexdigest()
     profile = profile_excel(source)
@@ -57,19 +62,91 @@ def test_project_manifest_references_source_and_records_audit_event(
     manifest_text = manifest_path.read_text(encoding="utf-8")
 
     assert sha256(source.read_bytes()).hexdigest() == before
-    assert manifest["schema_version"] == 1
-    assert manifest["source_path"] == str(source.resolve())
-    assert manifest["source_sha256"] == profile.source_sha256
+    assert manifest["schema_version"] == 2
+    assert manifest["source"]["relative_path"] == "source/source.xlsx"
+    assert manifest["source"]["sha256"] == profile.source_sha256
     assert manifest["data_profile"]["variables"]["int:2026"]["source_label"] == 2026
-    assert manifest["decisions"]["study_brief"]["title"] == "Cardiovascular outcomes"
-    assert manifest["generated_artifacts"] == []
+    assert manifest["state"]["study_brief"]["title"] == "Cardiovascular outcomes"
+    assert manifest["state"]["reports"] == []
     assert events[-1]["type"] == "data_structure_approved"
     assert events[-1]["actor"] == "user"
     assert "patient-001" not in manifest_text
-    assert not list(project.root.rglob("*.xlsx"))
+    assert str(source.resolve()) not in manifest_text
+    assert (project.root / "source" / "source.xlsx").is_file()
     assert not (project.root / "project.json.tmp").exists()
     for directory in ("artifacts", "artifacts/figures", "artifacts/reports", "artifacts/tables"):
         assert (project.root / directory).is_dir()
+
+
+def test_project_manifest_uses_an_immutable_relative_source_snapshot(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "private-patient-source.xlsx", ["patient_id", "age"])
+    project = create_project(tmp_path / "durable.biostat", brief, profile_excel(source))
+
+    manifest_text = project.manifest_path.read_text(encoding="utf-8")
+    manifest = json.loads(manifest_text)
+    snapshot = project.root / manifest["source"]["relative_path"]
+
+    assert manifest["schema_version"] == 2
+    assert manifest["source"]["relative_path"] == "source/source.xlsx"
+    assert str(source.resolve()) not in manifest_text
+    assert snapshot.read_bytes() == source.read_bytes()
+    assert sha256(snapshot.read_bytes()).hexdigest() == manifest["source"]["sha256"]
+
+
+def test_load_project_atomically_migrates_schema_one_without_retaining_source_path(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "legacy-private-source.xlsx", ["group", "outcome"])
+    project = create_project(tmp_path / "legacy.biostat", brief, profile_excel(source))
+    current = json.loads(project.manifest_path.read_text(encoding="utf-8"))
+    legacy = {
+        "schema_version": 1,
+        "source_path": str(source.resolve()),
+        "source_sha256": current["source"]["sha256"],
+        "data_profile": current["data_profile"],
+        "decisions": {"study_brief": brief.model_dump(mode="json")},
+        "generated_artifacts": [],
+    }
+    (project.root / current["source"]["relative_path"]).unlink()
+    project.manifest_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    create_project(project.root, brief, profile_excel(source))
+    _, migrated = load_project(project.root)
+
+    migrated_text = project.manifest_path.read_text(encoding="utf-8")
+    assert migrated["schema_version"] == 2
+    assert migrated["source"]["relative_path"] == "source/source.xlsx"
+    assert migrated["state"]["study_brief"] == brief.model_dump(mode="json")
+    assert str(source.resolve()) not in migrated_text
+    assert (project.root / "source" / "source.xlsx").read_bytes() == source.read_bytes()
+
+
+def test_project_state_round_trips_atomically_and_rejects_unsafe_artifact_refs(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "source.xlsx", ["group", "outcome"])
+    project = create_project(tmp_path / "reopen.biostat", brief, profile_excel(source))
+    state = {
+        "approved_roles": [
+            {"name": "outcome", "role": "outcome", "kind": "continuous", "confirmed": True}
+        ],
+        "plan": None,
+        "terminal_jobs": {},
+        "reports": [{"job_id": "11111111-1111-4111-8111-111111111111", "language": "en", "relative_path": "artifacts/reports/results-en.docx"}],
+    }
+
+    save_project_state(project, state)
+    loaded_project, loaded_manifest = load_project(project.root)
+
+    assert loaded_project.root == project.root
+    assert loaded_manifest["state"] == state
+    assert not list(project.root.glob(".project.json.*.tmp"))
+
+    state["reports"][0]["relative_path"] = "../outside.docx"
+    with pytest.raises(ValueError, match="unsafe_project_reference"):
+        save_project_state(project, state)
 
 
 def test_existing_project_is_preserved_when_schema_or_fingerprint_is_incompatible(
@@ -100,16 +177,16 @@ def test_existing_matching_project_is_reopened_without_replacing_manifest(
     original_project = create_project(root, brief, profile)
     manifest_path = root / "project.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["decisions"]["approved_plan_version"] = 3
-    manifest["generated_artifacts"] = ["artifacts/reports/results.docx"]
+    manifest["state"]["approved_plan_version"] = 3
+    manifest["state"]["reports"] = [{"relative_path": "artifacts/reports/results.docx"}]
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     reopened = create_project(root, brief, profile)
 
     assert reopened.root == original_project.root
     restored = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert restored["decisions"]["approved_plan_version"] == 3
-    assert restored["generated_artifacts"] == ["artifacts/reports/results.docx"]
+    assert restored["state"]["approved_plan_version"] == 3
+    assert restored["state"]["reports"] == [{"relative_path": "artifacts/reports/results.docx"}]
 
 
 def test_existing_project_rejects_changed_source_fingerprint_without_overwriting_it(
@@ -314,9 +391,11 @@ def test_project_manifest_encodes_tuple_source_labels_without_losing_type(
     tmp_path: Path, brief: StudyBrief
 ) -> None:
     """Treating tuple labels as arrays would lose a valid typed source identifier."""
+    source = tmp_path / "source.xlsx"
+    source.write_bytes(b"typed-header-fixture")
     profile = DataProfile(
-        source_path=tmp_path / "source.xlsx",
-        source_sha256="a" * 64,
+        source_path=source,
+        source_sha256=sha256(source.read_bytes()).hexdigest(),
         sheets=("Analysis",),
         selected_sheet="Analysis",
         rows=2,

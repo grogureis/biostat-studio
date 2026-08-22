@@ -42,6 +42,7 @@ class JobState:
     error_code: str | None = None
     message: str | None = None
     progress: int = 0
+    diagnostics: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,32 @@ class StagedJobResult:
 JobOperation = Callable[
     [Callable[[], bool], ProgressUpdate], Union[dict[str, Any], StagedJobResult]
 ]
+TerminalCallback = Callable[[JobState], None]
+
+
+_DIAGNOSTIC_CATEGORIES = {
+    "perfect_separation": "separation",
+    "complete_separation": "separation",
+    "convergence_warning": "convergence",
+    "singular_matrix": "estimation",
+    "non_finite_estimate": "numeric",
+}
+
+
+def _safe_failure(error: Exception) -> tuple[str, tuple[dict[str, str], ...]]:
+    if type(error).__name__ == "AnalysisExecutionError":
+        records = []
+        for warning in getattr(error, "warnings", []):
+            code = warning.get("code") if isinstance(warning, dict) else None
+            if isinstance(code, str) and code in _DIAGNOSTIC_CATEGORIES:
+                records.append({"category": _DIAGNOSTIC_CATEGORIES[code], "code": code})
+        if not records:
+            records.append({"category": "analysis", "code": "analysis_execution_error"})
+        return "analysis_execution_error", tuple(records)
+    name = type(error).__name__.lower()
+    if "convergence" in name:
+        return "convergence_failure", ({"category": "convergence", "code": "convergence_failure"},)
+    return "analysis_failed", ({"category": "library", "code": "library_failure"},)
 
 
 class JobManager:
@@ -67,6 +94,7 @@ class JobManager:
         self._cancelled: dict[UUID, Event] = {}
         self._futures: dict[UUID, Future[None]] = {}
         self._languages: dict[UUID, JobLanguage] = {}
+        self._terminal_callbacks: dict[UUID, TerminalCallback] = {}
         self._lock = Lock()
 
     def submit(
@@ -75,6 +103,7 @@ class JobManager:
         *,
         language: JobLanguage = "en",
         job_id: UUID | None = None,
+        on_terminal: TerminalCallback | None = None,
     ) -> JobState:
         job_id = job_id or uuid4()
         state = JobState(id=job_id, status="queued", message=JOB_MESSAGES[language]["queued"])
@@ -85,16 +114,27 @@ class JobManager:
             self._jobs[job_id] = state
             self._cancelled[job_id] = cancel_event
             self._languages[job_id] = language
+            if on_terminal is not None:
+                self._terminal_callbacks[job_id] = on_terminal
             self._futures[job_id] = self._executor.submit(self._run, job_id, operation)
         return state
 
     def _run(self, job_id: UUID, operation: JobOperation) -> None:
+        early_terminal: tuple[JobState, TerminalCallback | None] | None = None
         with self._lock:
             cancelled = self._cancelled[job_id]
             if cancelled.is_set():
                 self._jobs[job_id] = replace(self._jobs[job_id], status="cancelled", progress=100)
-                return
-            self._jobs[job_id] = replace(self._jobs[job_id], status="running", progress=10)
+                state = self._jobs[job_id]
+                callback = self._terminal_callbacks.pop(job_id, None)
+                early_terminal = (state, callback)
+            else:
+                self._jobs[job_id] = replace(self._jobs[job_id], status="running", progress=10)
+        if early_terminal is not None:
+            state, callback = early_terminal
+            if callback is not None:
+                callback(state)
+            return
         try:
             def update_progress(progress: int, stage: str) -> None:
                 if stage not in JOB_MESSAGES[self._languages[job_id]]:
@@ -110,20 +150,26 @@ class JobManager:
                     )
 
             prepared = operation(cancelled.is_set, update_progress)
-        except Exception:
+        except Exception as error:
+            error_code, diagnostics = _safe_failure(error)
             with self._lock:
                 state = self._jobs[job_id]
                 self._jobs[job_id] = replace(
                     state,
                     status="cancelled" if cancelled.is_set() else "failed",
-                    error_code=None if cancelled.is_set() else "analysis_failed",
+                    error_code=None if cancelled.is_set() else error_code,
                     message=(
                         None
                         if cancelled.is_set()
                         else JOB_MESSAGES[self._languages[job_id]]["failed"]
                     ),
                     progress=100,
+                    diagnostics=() if cancelled.is_set() else diagnostics,
                 )
+                terminal = self._jobs[job_id]
+                callback = self._terminal_callbacks.pop(job_id, None)
+            if callback is not None:
+                callback(terminal)
             return
         staged = prepared if isinstance(prepared, StagedJobResult) else StagedJobResult(
             result=prepared, publish=lambda: None, cleanup=lambda: None
@@ -146,6 +192,9 @@ class JobManager:
                             error_code="analysis_failed",
                             message=JOB_MESSAGES[self._languages[job_id]]["failed"],
                             progress=100,
+                            diagnostics=(
+                                {"category": "library", "code": "library_failure"},
+                            ),
                         )
                     else:
                         self._jobs[job_id] = replace(
@@ -156,10 +205,24 @@ class JobManager:
                 staged.cleanup()
             except OSError:
                 pass
+        with self._lock:
+            terminal = self._jobs[job_id]
+            callback = self._terminal_callbacks.pop(job_id, None)
+        if callback is not None:
+            callback(terminal)
 
     def get(self, job_id: UUID) -> JobState:
         with self._lock:
             return self._jobs[job_id]
+
+    def restore_terminal(self, state: JobState) -> None:
+        """Restore a durable terminal state without scheduling execution."""
+        if state.status not in {"completed", "failed", "cancelled"} or state.progress != 100:
+            raise ValueError("non_terminal_job_state")
+        with self._lock:
+            if state.id in self._jobs:
+                raise ValueError("duplicate_job_id")
+            self._jobs[state.id] = state
 
     def cancel(self, job_id: UUID) -> JobState:
         with self._lock:

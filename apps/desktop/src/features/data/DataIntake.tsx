@@ -1,4 +1,5 @@
 import type { AnalysisApi } from "../../api/client";
+import type { DataProfile, StudyBrief, VariableRole } from "../../api/types";
 import { useState } from "react";
 
 interface DataIntakeProps {
@@ -6,8 +7,9 @@ interface DataIntakeProps {
   dataFile: string | null;
   approved: boolean;
   language: "en" | "tr";
+  brief?: StudyBrief;
   onFile(path: string | null): void;
-  onApproval(): Promise<void>;
+  onApproval(roles: VariableRole[]): Promise<void>;
 }
 
 const labels = {
@@ -25,6 +27,7 @@ const labels = {
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
   pickerFailure: "The workbook picker could not be opened. Try again.",
     observations: "observations",
+    missing: "missing", role: "Role for", kind: "Kind for", variables: "Variable structure", warnings: "Questions to resolve",
   },
   tr: {
     eyebrow: "02 / Veri kökeni",
@@ -40,6 +43,7 @@ const labels = {
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
   pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
     observations: "gözlem",
+    missing: "eksik", role: "Rol", kind: "Tür", variables: "Değişken yapısı", warnings: "Çözülmesi gereken sorular",
   },
 } as const;
 
@@ -47,10 +51,11 @@ function basename(path: string): string {
   return path.split(/[\\/]/).at(-1) ?? path;
 }
 
-export function DataIntake({ api, dataFile, approved, language, onFile, onApproval }: DataIntakeProps) {
+export function DataIntake({ api, dataFile, approved, language, brief, onFile, onApproval }: DataIntakeProps) {
   const copy = labels[language];
   const [pickerFailed, setPickerFailed] = useState(false);
-  const [rows, setRows] = useState<number | null>(null);
+  const [profile, setProfile] = useState<DataProfile | null>(null);
+  const [roles, setRoles] = useState<Record<string, VariableRole>>({});
   const [approving, setApproving] = useState(false);
   const [approvalFailed, setApprovalFailed] = useState(false);
   const chooseFile = async () => {
@@ -58,7 +63,20 @@ export function DataIntake({ api, dataFile, approved, language, onFile, onApprov
       const path = await api.selectDataFile();
       setPickerFailed(false);
       onFile(path);
-      setRows(path && api.profileData ? (await api.profileData()).rows : null);
+      const nextProfile = path && api.profileData ? await api.profileData() : null;
+      setProfile(nextProfile);
+      if (nextProfile) {
+        setRoles(Object.fromEntries(Object.entries(nextProfile.variables).map(([name, variable]) => {
+          let role = "none";
+          if (brief?.outcome_variables.includes(name)) role = "outcome";
+          else if (brief?.exposure_variables?.includes(name)) role = "exposure";
+          else if (brief?.covariates?.includes(name)) role = "covariate";
+          else if (brief?.pair_id_variable === name) role = "pair_id";
+          const inferred = variable.kind === "identifier-candidate" ? "identifier" : variable.kind;
+          const kind = ["continuous", "binary", "categorical", "date", "identifier"].includes(inferred) ? inferred : "exclude";
+          return [name, { name, role, kind, confirmed: true }];
+        })));
+      }
     } catch {
       setPickerFailed(true);
     }
@@ -67,7 +85,7 @@ export function DataIntake({ api, dataFile, approved, language, onFile, onApprov
     setApproving(true);
     setApprovalFailed(false);
     try {
-      await onApproval();
+      await onApproval(Object.values(roles));
     } catch {
       setApprovalFailed(true);
     } finally {
@@ -87,19 +105,28 @@ export function DataIntake({ api, dataFile, approved, language, onFile, onApprov
         <div>
           <p className="drop-title">{dataFile ? copy.selected : copy.noFile}</p>
           {dataFile && <p className="file-name">{basename(dataFile)}</p>}
-          {rows !== null ? <p className="form-help">{rows} {copy.observations}</p> : null}
+          {profile !== null ? <p className="form-help">{profile.rows} {copy.observations}</p> : null}
           <p className="form-help">{copy.privacy}</p>
         </div>
         <button type="button" className="primary-action" onClick={chooseFile}>{copy.import}</button>
       </div>
+      {profile ? <section className="variable-profile" aria-labelledby="variable-profile-title">
+        <h2 id="variable-profile-title">{copy.variables}</h2>
+        {Object.entries(profile.variables).map(([name, variable]) => <article key={name} className="variable-row">
+          <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} unique</p>
+          <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}><option value="none">None</option><option value="outcome">Outcome</option><option value="exposure">Exposure</option><option value="covariate">Covariate</option><option value="pair_id">Pair ID</option><option value="exclude">Exclude</option></select></label>
+          <label>{copy.kind} {variable.display_name}<select aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}><option value="continuous">Continuous</option><option value="binary">Binary</option><option value="categorical">Categorical</option><option value="date">Date</option><option value="identifier">Identifier</option><option value="exclude">Exclude</option></select></label>
+        </article>)}
+        {profile.warnings.length ? <div className="warning-line"><strong>{copy.warnings}</strong><ul>{profile.warnings.map((warning) => <li key={`${warning.code}:${warning.column ?? "all"}`}>{warning.message}</li>)}</ul></div> : null}
+      </section> : null}
       {pickerFailed ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{copy.pickerFailure}</p></div> : null}
       {approvalFailed ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{copy.approvalFailure}</p></div> : null}
       <div className="task-footer">
-        <p className="microcopy">XLSX · XLS · CSV</p>
+        <p className="microcopy">XLSX</p>
         <button
           type="button"
           className="secondary-action"
-          disabled={!dataFile || approved || approving}
+          disabled={!profile || Object.keys(roles).length !== Object.keys(profile.variables).length || approved || approving}
           onClick={() => void approve()}
         >
           {approved ? copy.approved : approving ? copy.approving : copy.approve}

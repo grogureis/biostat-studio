@@ -89,6 +89,8 @@ def json_safe_label(label: object) -> str:
 def variable_key(label: object) -> str:
     """Keep string labels backward compatible and type-tag non-string labels."""
     if isinstance(label, str):
+        if re.match(r"^(?:str|int|float|bool|date|datetime|Timestamp|time|Decimal):", label):
+            return f"str:{label}"
         return label
     if isinstance(label, np.generic):
         label = label.item()

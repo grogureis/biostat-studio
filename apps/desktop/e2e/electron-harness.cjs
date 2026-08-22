@@ -3,7 +3,10 @@ const path = require("node:path");
 
 const digest = "a".repeat(64);
 const revision = "11111111-1111-4111-8111-111111111111";
-let pollCount = 0;
+let jobRunCount = 0;
+const pollCounts = new Map();
+const cancelledJobs = new Set();
+const reportLanguages = [];
 
 const plan = {
   version: 1,
@@ -47,34 +50,79 @@ const result = {
   warnings: [],
 };
 
+const brief = {
+  title: "Fixture study",
+  question: "Is the outcome different between groups?",
+  hypothesis: "The groups have different outcomes.",
+  design: "cohort",
+  outcome_variables: ["outcome"],
+  exposure_variables: ["group"],
+  covariates: [],
+  language: "en",
+};
+
+const profile = {
+  sheets: ["Analysis"], selected_sheet: "Analysis", rows: 12, columns: 2, missing_cells: 0,
+  variables: {
+    group: { display_name: "Group", kind: "binary", non_missing: 12, missing: 0, unique_values: 2 },
+    outcome: { display_name: "Outcome", kind: "continuous", non_missing: 12, missing: 0, unique_values: 12 },
+  },
+  warnings: [],
+};
+
+const roles = [
+  { name: "group", role: "exposure", kind: "binary", confirmed: true },
+  { name: "outcome", role: "outcome", kind: "continuous", confirmed: true },
+];
+
 function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, body };
 }
 
 function fixtureApi(request) {
   const { path: route, method } = request;
-  if (route === "/v1/data/profile" && method === "POST") return response({ rows: 12 });
-  if (route === "/v1/projects" && method === "POST") return response({ id: "project-1", profile: { rows: 12 } });
+  const body = request.body ?? {};
+  if (["source_path", "project_root", "destination"].some((key) => Object.prototype.hasOwnProperty.call(body, key))) {
+    return response({ detail: "renderer_raw_path_rejected" }, 400);
+  }
+  if (route === "/v1/data/profile" && method === "POST") return response(profile);
+  if (route === "/v1/projects" && method === "POST") return response({ id: "project-1", profile });
+  if (route === "/v1/projects/open" && method === "POST") return response({ id: "project-1", brief, roles, plan, approved_plan: true, completed_job_id: "job-2", results: [result] });
   if (route === "/v1/projects/project-1/data-approval" && method === "POST") return response({ approved: true });
   if (route === "/v1/plans" && method === "POST") return response(plan);
   if (route === "/v1/plans/approval" && method === "POST") return response({ approved: true, revision, digest });
   if (route === "/v1/jobs" && method === "POST") {
-    pollCount = 0;
-    return response({ id: "job-1", status: "queued", progress: 0, message: "Analysis queued.", error_code: null, result: null });
+    jobRunCount += 1;
+    const id = `job-${jobRunCount}`;
+    pollCounts.set(id, 0);
+    return response({ id, status: "queued", progress: 0, message: "Analysis queued.", error_code: null, result: null });
   }
-  if (route === "/v1/jobs/job-1" && method === "GET") {
-    pollCount += 1;
-    if (pollCount === 1) return response({ id: "job-1", status: "running", progress: 70, message: "Building publication figures.", error_code: null, result: null });
-    return response({ id: "job-1", status: "completed", progress: 100, message: "Publishing verified results.", error_code: null, result: { results: [result], warnings: [] } });
+  const cancelMatch = route.match(/^\/v1\/jobs\/(job-\d+)\/cancel$/);
+  if (cancelMatch && method === "POST") {
+    cancelledJobs.add(cancelMatch[1]);
+    return response({ id: cancelMatch[1], status: "cancelling", progress: 70, message: "Cancelling.", error_code: null, result: null });
   }
-  if (route === "/v1/reports" && method === "POST") return response({ saved: true, filename: "Fixture Results.docx" });
+  const jobMatch = route.match(/^\/v1\/jobs\/(job-\d+)$/);
+  if (jobMatch && method === "GET") {
+    const id = jobMatch[1];
+    const count = (pollCounts.get(id) ?? 0) + 1;
+    pollCounts.set(id, count);
+    if (cancelledJobs.has(id)) return response({ id, status: "cancelled", progress: 100, message: null, error_code: null, result: null });
+    if (count === 1) return response({ id, status: "running", progress: 70, message: "Building publication figures.", error_code: null, result: null });
+    return response({ id, status: "completed", progress: 100, message: "Publishing verified results.", error_code: null, result: { results: [result], warnings: [] } });
+  }
+  if (route === "/v1/reports" && method === "POST") {
+    reportLanguages.push(request.body.language);
+    return response({ saved: true, filename: `Fixture Results ${request.body.language}.docx` });
+  }
   return response({ error: { code: "fixture_route_missing", message: "Fixture route is unavailable." } }, 404);
 }
 
-ipcMain.handle("biostat:select-data-file", () => "/fixture/12-observations.xlsx");
-ipcMain.handle("biostat:select-project", () => "/fixture/project");
-ipcMain.handle("biostat:select-report-destination", () => "/fixture/Fixture Results.docx");
+ipcMain.handle("biostat:select-data-file", () => ({ displayName: "12-observations.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }));
+ipcMain.handle("biostat:select-project", (_event, mode) => ({ id: `${mode}-project-cap`, displayName: "Fixture project" }));
+ipcMain.handle("biostat:select-report-destination", () => ({ id: `report-cap-${reportLanguages.length}`, displayName: "Fixture Results.docx" }));
 ipcMain.handle("biostat:request-api", (_event, request) => fixtureApi(request));
+ipcMain.handle("biostat:e2e-state", () => ({ jobRunCount, reportLanguages }));
 
 app.whenReady().then(async () => {
   const window = new BrowserWindow({

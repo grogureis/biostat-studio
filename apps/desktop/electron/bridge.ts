@@ -10,10 +10,21 @@ export interface ApiResponse {
   body: unknown;
 }
 
+export interface PathCapability {
+  id: string;
+  displayName: string;
+}
+
+export interface DataFileCapability {
+  displayName: string;
+  profileCapability: string;
+  importCapability: string;
+}
+
 export interface BiostatBridge {
-  selectDataFile(): Promise<string | null>;
-  selectProject(): Promise<string | null>;
-  selectReportDestination(): Promise<string | null>;
+  selectDataFile(): Promise<DataFileCapability | null>;
+  selectProject(mode: "create" | "open"): Promise<PathCapability | null>;
+  selectReportDestination(): Promise<PathCapability | null>;
   requestApi(request: ApiRequest): Promise<ApiResponse>;
 }
 
@@ -21,9 +32,9 @@ type Invoke = <T>(channel: string, payload?: unknown) => Promise<T>;
 
 export function createBiostatBridge(invoke: Invoke): BiostatBridge {
   return Object.freeze({
-    selectDataFile: (): Promise<string | null> => invoke("biostat:select-data-file"),
-    selectProject: (): Promise<string | null> => invoke("biostat:select-project"),
-    selectReportDestination: (): Promise<string | null> => invoke("biostat:select-report-destination"),
+    selectDataFile: (): Promise<DataFileCapability | null> => invoke("biostat:select-data-file"),
+    selectProject: (mode: "create" | "open"): Promise<PathCapability | null> => invoke("biostat:select-project", mode),
+    selectReportDestination: (): Promise<PathCapability | null> => invoke("biostat:select-report-destination"),
     requestApi: (request: ApiRequest): Promise<ApiResponse> => invoke("biostat:request-api", request),
   });
 }

@@ -1,7 +1,16 @@
+interface PathCapability {
+  id: string;
+  displayName: string;
+}
+
 interface BiostatBridge {
-  selectDataFile(): Promise<string | null>;
-  selectProject(): Promise<string | null>;
-  selectReportDestination(): Promise<string | null>;
+  selectDataFile(): Promise<{
+    displayName: string;
+    profileCapability: string;
+    importCapability: string;
+  } | null>;
+  selectProject(mode: "create" | "open"): Promise<PathCapability | null>;
+  selectReportDestination(): Promise<PathCapability | null>;
   requestApi(request: {
     path: string;
     method: "GET" | "POST";

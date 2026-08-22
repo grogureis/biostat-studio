@@ -6,6 +6,7 @@ from threading import Event
 from time import sleep
 
 from biostat_service.jobs import JobManager, StagedJobResult
+from biostat_service.analyses import AnalysisExecutionError
 
 
 def test_cancelled_job_never_becomes_completed() -> None:
@@ -58,6 +59,24 @@ def test_job_failure_message_is_safe_and_localized_for_turkish() -> None:
     assert final.error_code == "analysis_failed"
     assert final.message == "Analiz tamamlanamadı."
     assert "patient-001" not in final.message
+    manager.shutdown()
+
+
+def test_analysis_execution_failure_exposes_only_allowlisted_diagnostic_categories() -> None:
+    manager = JobManager(max_workers=1)
+
+    def failing_job(_is_cancelled, _update_progress):
+        raise AnalysisExecutionError(
+            "/private/patient-001.xlsx",
+            warnings=[{"code": "perfect_separation", "message": "patient-001"}],
+        )
+
+    final = manager.wait(manager.submit(failing_job).id, timeout=1)
+
+    assert final.status == "failed"
+    assert final.error_code == "analysis_execution_error"
+    assert final.diagnostics == ({"category": "separation", "code": "perfect_separation"},)
+    assert "patient-001" not in repr(final)
     manager.shutdown()
 
 

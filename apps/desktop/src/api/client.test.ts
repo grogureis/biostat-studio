@@ -22,6 +22,20 @@ const plan: AnalysisPlan = {
 };
 
 describe("authenticated loopback API client", () => {
+  it("opens only a native-selected project capability and restores its completed job", async () => {
+    const restored = { id: "project-1", brief, roles: [], plan, approved_plan: true, completed_job_id: "job-1", results: [] };
+    const requestApi = vi.fn().mockResolvedValue({ ok: true, status: 200, body: restored });
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn(),
+      selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }),
+      selectReportDestination: vi.fn(), requestApi,
+    });
+
+    await expect(api.openProject!()).resolves.toEqual(restored);
+    expect(requestApi).toHaveBeenCalledWith({
+      path: "/v1/projects/open", method: "POST", body: { project_capability: "open-cap" },
+    });
+  });
   it("creates a project, plans, runs the approved version, and exports only after completion", async () => {
     const requestApi = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, body: { id: "project-1", profile: { rows: 12 } } })
@@ -33,8 +47,9 @@ describe("authenticated loopback API client", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, body: { id: "job-1", status: "completed", progress: 100, message: "Publishing verified results.", error_code: null, result: { results: [], warnings: [] } } })
       .mockResolvedValueOnce({ ok: true, status: 200, body: { saved: true, filename: "Results.docx" } });
     const bridge = {
-      selectDataFile: vi.fn().mockResolvedValue("/private/study.xlsx"),
-      selectReportDestination: vi.fn().mockResolvedValue("/private/Results.docx"),
+      selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
+      selectReportDestination: vi.fn().mockResolvedValue({ id: "report-cap", displayName: "Results.docx" }),
       requestApi,
     };
     const api = createAnalysisApi(bridge);
@@ -54,6 +69,10 @@ describe("authenticated loopback API client", () => {
     expect(requestApi.mock.calls[4][0]).toMatchObject({
       body: { project_id: "project-1", approved_plan_revision: plan.revision, approved_plan_digest: plan.digest },
     });
+    expect(requestApi.mock.calls[0][0].body).toMatchObject({ source_capability: "import-cap", project_capability: "create-cap" });
+    expect(bridge.selectProject).toHaveBeenCalledWith("create");
+    expect(JSON.stringify(requestApi.mock.calls)).not.toContain("/private/study.xlsx");
+    expect(requestApi.mock.calls[7][0].body).toMatchObject({ destination_capability: "report-cap" });
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ progress: 45, message: "Running approved methods." }));
   });
 
@@ -61,12 +80,42 @@ describe("authenticated loopback API client", () => {
     const requestApi = vi.fn().mockResolvedValue({ ok: true, status: 200, body: { id: "job-1", status: "cancelled", result: null } });
     const api = createAnalysisApi({
       selectDataFile: vi.fn(),
+      selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(),
       requestApi,
     });
 
     await api.cancelAnalysis();
     expect(requestApi).not.toHaveBeenCalled();
+  });
+
+  it("keeps authoritative job ownership while cancelling until the server is terminal", async () => {
+    let releaseRunning!: (value: { ok: boolean; status: number; body: unknown }) => void;
+    const runningPoll = new Promise<{ ok: boolean; status: number; body: unknown }>((resolve) => { releaseRunning = resolve; });
+    let polls = 0;
+    const requestApi = vi.fn((request: { path: string }) => {
+      if (request.path === "/v1/projects/open") return Promise.resolve({ ok: true, status: 200, body: { id: "project-1", brief, roles: [], plan, approved_plan: true, completed_job_id: null, results: [] } });
+      if (request.path === "/v1/jobs") return Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "queued", result: null } });
+      if (request.path === "/v1/jobs/job-1/cancel") return Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "cancelling", result: null } });
+      polls += 1;
+      return polls === 1 ? runningPoll : Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "cancelled", progress: 100, result: null } });
+    });
+    const api = createAnalysisApi({ selectDataFile: vi.fn(), selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }), selectReportDestination: vi.fn(), requestApi });
+
+    await api.openProject!();
+    const run = api.runAnalysis(plan);
+    await vi.waitFor(() => expect(requestApi).toHaveBeenCalledWith(expect.objectContaining({ path: "/v1/jobs/job-1" })));
+    const cancelling = api.cancelAnalysis();
+    let cancelResolved = false;
+    void cancelling.then(() => { cancelResolved = true; });
+    await vi.waitFor(() => expect(requestApi).toHaveBeenCalledWith(expect.objectContaining({ path: "/v1/jobs/job-1/cancel" })));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(cancelResolved).toBe(false);
+    releaseRunning({ ok: true, status: 200, body: { id: "job-1", status: "cancelling", progress: 45, result: null } });
+
+    await expect(cancelling).resolves.toBeUndefined();
+    await expect(run).rejects.toMatchObject({ code: "cancelled" });
+    expect(requestApi.mock.calls.map(([request]) => request.path)).toContain("/v1/jobs/job-1/cancel");
   });
 
   it("cooperatively cancels an active job when project inputs are invalidated", async () => {
@@ -82,7 +131,8 @@ describe("authenticated loopback API client", () => {
       return pendingPoll;
     });
     const api = createAnalysisApi({
-      selectDataFile: vi.fn().mockResolvedValue("/private/study.xlsx"),
+      selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(),
       requestApi,
     });

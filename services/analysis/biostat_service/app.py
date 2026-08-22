@@ -25,7 +25,15 @@ from .contracts import AnalysisPlan, StudyBrief, VariableRole
 from .data_intake import DataProfile, profile_excel
 from .jobs import JobManager, JobState, StagedJobResult
 from .planner import build_plan
-from .projects import LocalProject, append_audit_event, create_project
+from .projects import (
+    LocalProject,
+    append_audit_event,
+    atomic_file_copy,
+    create_project,
+    load_project,
+    profile_from_manifest,
+    save_project_state,
+)
 from .reporting import build_results_docx
 from .security import require_loopback, require_session, session_token
 from .visuals import FigureArtifact, build_figures
@@ -53,6 +61,10 @@ class ProjectRequest(BaseModel):
 
 class DataProfileRequest(BaseModel):
     source_path: str = Field(min_length=1)
+
+
+class OpenProjectRequest(BaseModel):
+    project_root: str = Field(min_length=1)
 
 
 class PlanRequest(BaseModel):
@@ -98,6 +110,8 @@ class ProjectContext:
     figures: list[FigureArtifact] | None = None
     job_ids: set[UUID] = field(default_factory=set)
     job_outputs: dict[UUID, "JobOutput"] = field(default_factory=dict)
+    terminal_jobs: dict[UUID, JobState] = field(default_factory=dict)
+    report_refs: list[dict[str, str]] = field(default_factory=list)
     state_lock: Any = field(default_factory=Lock, repr=False)
 
 
@@ -109,6 +123,122 @@ class JobOutput:
     figures: tuple[FigureArtifact, ...]
     revision: UUID
     digest: str
+
+
+def _job_result_payload(bundle: AnalysisBundle) -> dict[str, Any]:
+    return {
+        "results": [result.model_dump(mode="json") for result in bundle.results.values()],
+        "warnings": bundle.warnings,
+    }
+
+
+def _context_state(context: ProjectContext) -> dict[str, Any]:
+    plan_record = None
+    if context.plan is not None and context.plan_revision is not None and context.plan_digest:
+        plan_record = {
+            "content": context.plan.model_dump(mode="json"),
+            "revision": str(context.plan_revision),
+            "digest": context.plan_digest,
+            "approved": (
+                context.approved_plan_revision == context.plan_revision
+                and context.approved_plan_digest == context.plan_digest
+            ),
+        }
+    terminal_jobs: dict[str, Any] = {
+        str(job_id): {
+            "status": "completed",
+            "result": _job_result_payload(output.bundle),
+            "output": {
+                "plan": output.plan.model_dump(mode="json"),
+                "brief": output.brief.model_dump(mode="json"),
+                "bundle": output.bundle.model_dump(mode="json"),
+                "revision": str(output.revision),
+                "digest": output.digest,
+            },
+        }
+        for job_id, output in context.job_outputs.items()
+    }
+    terminal_jobs.update({
+        str(job_id): {
+            "status": state.status,
+            "result": None,
+            "error_code": state.error_code,
+            "diagnostics": list(state.diagnostics),
+        }
+        for job_id, state in context.terminal_jobs.items()
+        if state.status in {"failed", "cancelled"}
+    })
+    return {
+        "study_brief": context.brief.model_dump(mode="json"),
+        "approved_roles": (
+            [role.model_dump(mode="json") for role in context.approved_roles.values()]
+            if context.approved_roles is not None
+            else None
+        ),
+        "plan": plan_record,
+        "terminal_jobs": terminal_jobs,
+        "reports": list(context.report_refs),
+    }
+
+
+def _persist_context(context: ProjectContext) -> None:
+    save_project_state(context.project, _context_state(context))
+
+
+def _restore_context(project: LocalProject, manifest: dict[str, Any]) -> ProjectContext:
+    state = manifest["state"]
+    brief = StudyBrief.model_validate(state["study_brief"])
+    approved_roles_value = state.get("approved_roles")
+    approved_roles = None
+    if approved_roles_value is not None:
+        approved_roles = {
+            role.name: role for role in (
+                VariableRole.model_validate(value) for value in approved_roles_value
+            )
+        }
+    context = ProjectContext(
+        project=project,
+        profile=profile_from_manifest(project, manifest),
+        brief=brief,
+        data_structure_approved=approved_roles is not None,
+        approved_roles=approved_roles,
+        report_refs=[dict(value) for value in state.get("reports", [])],
+    )
+    plan_value = state.get("plan")
+    if plan_value is not None:
+        context.plan = AnalysisPlan.model_validate(plan_value["content"])
+        context.plan_revision = UUID(plan_value["revision"])
+        context.plan_digest = str(plan_value["digest"])
+        if plan_value.get("approved") is True:
+            context.approved_plan_revision = context.plan_revision
+            context.approved_plan_digest = context.plan_digest
+    for job_id_value, terminal in state.get("terminal_jobs", {}).items():
+        job_id = UUID(job_id_value)
+        if terminal.get("status") != "completed":
+            terminal_state = JobState(
+                id=job_id,
+                status=str(terminal["status"]),
+                result=None,
+                error_code=terminal.get("error_code"),
+                progress=100,
+                diagnostics=tuple(terminal.get("diagnostics", [])),
+            )
+            context.job_ids.add(job_id)
+            context.terminal_jobs[job_id] = terminal_state
+            continue
+        output_value = terminal["output"]
+        output = JobOutput(
+            plan=AnalysisPlan.model_validate(output_value["plan"]),
+            brief=StudyBrief.model_validate(output_value["brief"]),
+            bundle=AnalysisBundle.model_validate(output_value["bundle"]),
+            figures=(),
+            revision=UUID(output_value["revision"]),
+            digest=str(output_value["digest"]),
+        )
+        context.job_ids.add(job_id)
+        context.job_outputs[job_id] = output
+        context.bundle = output.bundle
+    return context
 
 
 def _profile_payload(profile: DataProfile) -> dict[str, Any]:
@@ -144,6 +274,7 @@ def _job_payload(job: JobState) -> dict[str, Any]:
         "result": job.result,
         "error_code": job.error_code,
         "message": job.message,
+        "diagnostics": list(job.diagnostics),
     }
 
 
@@ -154,19 +285,44 @@ def _plan_digest(plan: AnalysisPlan) -> str:
     return sha256(canonical).hexdigest()
 
 
-def _default_roles(context: ProjectContext) -> dict[str, VariableRole]:
-    roles: dict[str, VariableRole] = {}
-    requested = (
-        *((name, "outcome") for name in context.brief.outcome_variables),
-        *((name, "exposure") for name in context.brief.exposure_variables),
-        *((name, "covariate") for name in context.brief.covariates),
-    )
+def _validated_roles(
+    context: ProjectContext, submitted: list[VariableRole]
+) -> dict[str, VariableRole]:
+    if not submitted:
+        raise HTTPException(status_code=422, detail="explicit_variable_snapshot_required")
+    roles = {role.name: role for role in submitted}
+    if len(roles) != len(submitted) or set(roles) != set(context.profile.variables):
+        raise HTTPException(status_code=422, detail="complete_variable_snapshot_required")
+    allowed_roles = {"outcome", "exposure", "covariate", "pair_id", "none", "exclude"}
+    allowed_kinds = {"continuous", "binary", "categorical", "date", "identifier", "exclude"}
+    if any(
+        not role.confirmed
+        or role.role not in allowed_roles
+        or role.kind not in allowed_kinds
+        for role in roles.values()
+    ):
+        raise HTTPException(status_code=422, detail="unconfirmed_variable_roles")
+    expected = {
+        **{name: "outcome" for name in context.brief.outcome_variables},
+        **{name: "exposure" for name in context.brief.exposure_variables},
+        **{name: "covariate" for name in context.brief.covariates},
+    }
     if context.brief.pair_id_variable:
-        requested = (*requested, (context.brief.pair_id_variable, "pair_id"))
-    for name, role in requested:
-        metadata = context.profile.variables.get(name)
-        if metadata is not None:
-            roles[name] = VariableRole(name=name, role=role, kind=metadata.kind, confirmed=True)
+        expected[context.brief.pair_id_variable] = "pair_id"
+    if any(name not in roles or roles[name].role != role for name, role in expected.items()):
+        raise HTTPException(status_code=422, detail="study_role_mismatch")
+    warnings_by_column = {
+        (warning.column, warning.code) for warning in context.profile.warnings
+    }
+    for name, role in roles.items():
+        metadata = context.profile.variables[name]
+        if (
+            metadata.kind == "identifier-candidate"
+            or (name, "suspicious_identifier_leakage") in warnings_by_column
+        ) and role.role not in {"pair_id", "exclude"}:
+            raise HTTPException(status_code=422, detail="unresolved_identifier_role")
+        if (name, "mixed_types") in warnings_by_column and role.kind == metadata.kind:
+            raise HTTPException(status_code=422, detail="unresolved_mixed_type")
     return roles
 
 
@@ -285,13 +441,61 @@ def create_app() -> FastAPI:
             )
             project = create_project(root, request.brief, profile)
             append_audit_event(project, {"type": "data_imported", "actor": "user"})
+            _, manifest = load_project(project.root)
         except (OSError, ValueError, RuntimeError):
             raise HTTPException(status_code=422, detail="project_creation_failed")
-        project_id = uuid4()
+        project_id = UUID(manifest["project_id"])
         projects[project_id] = ProjectContext(
             project=project, profile=profile, brief=request.brief
         )
         return {"id": str(project_id), "profile": _profile_payload(profile)}
+
+    @v1.post("/projects/open")
+    def open_local_project(request: OpenProjectRequest) -> dict[str, Any]:
+        try:
+            project, manifest = load_project(Path(request.project_root))
+            project_id = UUID(manifest["project_id"])
+            context = _restore_context(project, manifest)
+        except (OSError, KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="project_open_failed")
+        if project_id in projects:
+            raise HTTPException(status_code=409, detail="project_already_open")
+        projects[project_id] = context
+        for job_id, output in context.job_outputs.items():
+            manager.restore_terminal(
+                JobState(
+                    id=job_id,
+                    status="completed",
+                    result=_job_result_payload(output.bundle),
+                    progress=100,
+                )
+            )
+        for job_id, state in context.terminal_jobs.items():
+            manager.restore_terminal(state)
+        completed_job_id = next(reversed(context.job_outputs), None)
+        return {
+            "id": str(project_id),
+            "profile": _profile_payload(context.profile),
+            "brief": context.brief.model_dump(mode="json"),
+            "roles": (
+                [role.model_dump(mode="json") for role in context.approved_roles.values()]
+                if context.approved_roles is not None else []
+            ),
+            "plan": (
+                {
+                    **context.plan.model_dump(mode="json"),
+                    "revision": str(context.plan_revision),
+                    "digest": context.plan_digest,
+                }
+                if context.plan is not None else None
+            ),
+            "approved_plan": context.approved_plan_revision is not None,
+            "completed_job_id": str(completed_job_id) if completed_job_id else None,
+            "results": (
+                _job_result_payload(context.job_outputs[completed_job_id].bundle)["results"]
+                if completed_job_id else []
+            ),
+        }
 
     @v1.post("/plans")
     def create_plan(request: PlanRequest) -> dict[str, Any]:
@@ -315,6 +519,7 @@ def create_app() -> FastAPI:
                     "plan_version": plan.version,
                 },
             )
+            _persist_context(context)
             return {
                 **plan.model_dump(mode="json"),
                 "revision": str(context.plan_revision),
@@ -342,6 +547,7 @@ def create_app() -> FastAPI:
                     "status": "approved",
                 },
             )
+            _persist_context(context)
         return {"approved": True, "revision": str(request.revision), "digest": request.digest}
 
     @v1.post("/projects/{project_id}/data-approval")
@@ -351,17 +557,14 @@ def create_app() -> FastAPI:
         context = _get_context(projects, project_id)
         with context.state_lock:
             if not context.data_structure_approved:
-                roles = {role.name: role for role in request.roles} or _default_roles(context)
-                if any(not role.confirmed for role in roles.values()):
-                    raise HTTPException(
-                        status_code=422, detail="unconfirmed_variable_roles"
-                    )
+                roles = _validated_roles(context, request.roles)
                 append_audit_event(
                     context.project,
                     {"type": "data_structure_approved", "actor": "user"},
                 )
                 context.approved_roles = roles
                 context.data_structure_approved = True
+                _persist_context(context)
         return {"approved": True}
 
     @v1.post("/jobs")
@@ -448,13 +651,18 @@ def create_app() -> FastAPI:
                     context.job_outputs[job_id] = output
                     context.bundle = bundle
                     context.figures = list(published_figures)
+                    try:
+                        _persist_context(context)
+                    except Exception:
+                        context.job_outputs.pop(job_id, None)
+                        context.bundle = None
+                        context.figures = None
+                        shutil.rmtree(final_root, ignore_errors=True)
+                        raise
 
             return StagedJobResult(
                 result={
-                    "results": [
-                        result.model_dump(mode="json") for result in bundle.results.values()
-                    ],
-                    "warnings": bundle.warnings,
+                    **_job_result_payload(bundle),
                 },
                 publish=publish,
                 cleanup=cleanup,
@@ -471,8 +679,26 @@ def create_app() -> FastAPI:
         )
         with context.state_lock:
             context.job_ids.add(job_id)
+        def record_terminal(state: JobState) -> None:
+            if state.status not in {"failed", "cancelled"}:
+                return
+            event_type = "analysis_failed" if state.status == "failed" else "analysis_cancelled"
+            with context.state_lock:
+                context.terminal_jobs[state.id] = state
+                append_audit_event(
+                    context.project,
+                    {
+                        "type": event_type,
+                        "actor": "system",
+                        "plan_version": plan.version,
+                        "status": state.status,
+                    },
+                )
+                _persist_context(context)
         try:
-            job = manager.submit(run, language=brief.language, job_id=job_id)
+            job = manager.submit(
+                run, language=brief.language, job_id=job_id, on_terminal=record_terminal
+            )
         except Exception:
             with context.state_lock:
                 context.job_ids.discard(job_id)
@@ -508,22 +734,58 @@ def create_app() -> FastAPI:
         if job.status != "completed" or output is None:
             raise HTTPException(status_code=409, detail="completed_analysis_required")
         destination = Path(request.destination)
+        staging = (
+            context.project.root
+            / "artifacts"
+            / f".report-staging-{request.job_id}-{uuid4()}"
+        )
         try:
+            if staging.exists() or staging.is_symlink():
+                raise ValueError("unsafe_report_staging")
+            staging.mkdir(parents=True)
+            frame = _read_frame(context)
+            figures = build_figures(
+                frame,
+                output.plan,
+                output.bundle,
+                staging / "figures",
+                request.language,
+            )
+            staged_report = staging / "report.docx"
             build_results_docx(
                 context.project,
                 output.brief,
                 output.plan,
                 output.bundle,
-                output.figures,
+                figures,
                 request.language,
-                destination,
+                staged_report,
             )
+            report_relative = (
+                Path("artifacts")
+                / "reports"
+                / f"{request.job_id}-{request.language}-{uuid4()}.docx"
+            )
+            atomic_file_copy(staged_report, context.project.root / report_relative)
+            atomic_file_copy(staged_report, destination)
+            with context.state_lock:
+                context.report_refs.append(
+                    {
+                        "job_id": str(request.job_id),
+                        "language": request.language,
+                        "relative_path": report_relative.as_posix(),
+                    }
+                )
             append_audit_event(
                 context.project,
                 {"type": "report_exported", "actor": "user", "plan_version": output.plan.version},
             )
+            with context.state_lock:
+                _persist_context(context)
         except (OSError, ValueError):
             raise HTTPException(status_code=422, detail="report_export_failed")
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return {"saved": True, "filename": destination.name}
 
     app.include_router(v1)
