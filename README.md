@@ -30,12 +30,15 @@ The current release executes:
 - paired t test for a confirmed two-condition repeated design;
 - Welch ANOVA;
 - Pearson chi-square or Fisher exact test, selected from table conditions;
-- Pearson correlation;
+- Pearson correlation and Spearman rank correlation;
+- Mann–Whitney U (Hodges–Lehmann shift and rank-biserial effect);
+- Wilcoxon signed-rank (pseudomedian and matched rank-biserial effect);
+- Kruskal–Wallis with Holm-adjusted Dunn pairwise comparisons;
 - linear regression with HC3 covariance;
 - binary logistic regression;
 - effect estimates, 95% confidence intervals, exact p values, and method-specific diagnostics.
 
-Mann–Whitney U, Wilcoxon signed-rank, Kruskal–Wallis, and Spearman correlation may appear as **documented alternatives**, but they are not automatically executed in this version. CSV/SAV import, survival analysis, mixed models, power analysis, meta-analysis, causal-inference workflows, and machine learning remain roadmap items.
+Rank-based methods are never selected silently: the plan documents them as alternatives, and switching to one regenerates the plan for a new explicit approval. A deterministic a-priori **power and sample-size calculator** (two-sample and paired t tests, one-way ANOVA, two proportions, correlation) is available without touching imported data. CSV/SAV import, survival analysis, mixed models, meta-analysis, causal-inference workflows, and machine learning remain roadmap items.
 
 ## Architecture
 

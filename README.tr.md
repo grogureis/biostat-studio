@@ -30,12 +30,15 @@ Mevcut sürüm şu analizleri yürütür:
 - onaylanmış iki koşullu tekrarlı tasarım için eşleştirilmiş t testi;
 - Welch ANOVA;
 - tablo koşullarına göre Pearson ki-kare veya Fisher kesin testi;
-- Pearson korelasyon;
+- Pearson korelasyon ve Spearman sıra korelasyonu;
+- Mann–Whitney U (Hodges–Lehmann kayması ve sıra çift-serili etki);
+- Wilcoxon işaretli sıralar (psödomedyan ve eşleştirilmiş sıra çift-serili etki);
+- Holm düzeltmeli Dunn ikili karşılaştırmalarıyla Kruskal–Wallis;
 - HC3 kovaryanslı doğrusal regresyon;
 - ikili lojistik regresyon;
 - etki tahminleri, %95 güven aralıkları, kesin p değerleri ve yönteme özgü tanılar.
 
-Mann–Whitney U, Wilcoxon işaretli sıralar, Kruskal–Wallis ve Spearman korelasyon **belgelenmiş alternatif** olarak görünebilir; ancak bu sürümde otomatik yürütülmez. CSV/SAV aktarımı, sağkalım analizi, karma modeller, güç analizi, meta-analiz, nedensel çıkarım ve makine öğrenmesi yol haritasındadır.
+Sıra temelli yöntemler asla sessizce seçilmez: plan bunları alternatif olarak belgeler ve birine geçiş, yeni bir açık onay için planı yeniden oluşturur. İçe aktarılmış veriye dokunmayan belirlenimci önsel **güç ve örneklem büyüklüğü hesaplayıcısı** (iki örneklem ve eşleştirilmiş t testleri, tek yönlü ANOVA, iki oran, korelasyon) kullanılabilir. CSV/SAV aktarımı, sağkalım analizi, karma modeller, meta-analiz, nedensel çıkarım ve makine öğrenmesi yol haritasındadır.
 
 ## Mimari
 
