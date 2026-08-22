@@ -97,6 +97,16 @@ def variable_key(label: object) -> str:
     return f"{type(label).__name__}:{json_safe_label(label)}"
 
 
+def canonicalize_frame_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Apply the collision-safe profiling identifiers to an execution frame."""
+    keys = [variable_key(column) for column in frame.columns]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate_canonical_column_names")
+    canonical = frame.copy()
+    canonical.columns = keys
+    return canonical
+
+
 def _value_family(value: Any) -> str:
     if isinstance(value, (pd.Timestamp, np.datetime64)):
         return "date"

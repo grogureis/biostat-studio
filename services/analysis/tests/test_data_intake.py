@@ -8,10 +8,12 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+import numpy as np
 from openpyxl import Workbook
+import pandas as pd
 import pytest
 
-from biostat_service.data_intake import profile_excel
+from biostat_service.data_intake import canonicalize_frame_columns, profile_excel
 
 
 FIXTURE_PATH = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "core-study.xlsx"
@@ -141,6 +143,28 @@ def test_profile_excel_escapes_literal_typed_header_key_collisions(tmp_path: Pat
     assert profile.variables["str:int:2026"].source_label == "int:2026"
 
 
+def test_canonicalize_frame_columns_uses_profile_lookup_keys_for_execution() -> None:
+    frame = pd.DataFrame(
+        [[1, "A", "B"]], columns=[2026, "int:2026", "str:int:2026"]
+    )
+
+    canonical = canonicalize_frame_columns(frame)
+
+    assert canonical.columns.tolist() == [
+        "int:2026",
+        "str:int:2026",
+        "str:str:int:2026",
+    ]
+    assert canonical.iloc[0].tolist() == [1, "A", "B"]
+
+
+def test_canonicalize_frame_columns_rejects_duplicate_normalized_keys() -> None:
+    frame = pd.DataFrame([[1, 2]], columns=[1, np.int64(1)])
+
+    with pytest.raises(ValueError, match="duplicate_canonical_column_names"):
+        canonicalize_frame_columns(frame)
+
+
 def test_profile_excel_rejects_unknown_sheet_without_changing_source(core_workbook: Path) -> None:
     """An invalid sheet selection must not fall back silently or alter the workbook."""
     before = file_sha256(core_workbook)
@@ -153,8 +177,6 @@ def test_profile_excel_rejects_unknown_sheet_without_changing_source(core_workbo
 
 def test_fixture_complete_case_group_difference_is_documented_value() -> None:
     """Changing fixture values must retain the known later Welch estimate contract."""
-    import pandas as pd
-
     frame = pd.read_excel(FIXTURE_PATH, sheet_name="Analysis")
     means = frame.groupby("treatment_group")["age_years"].mean()
 

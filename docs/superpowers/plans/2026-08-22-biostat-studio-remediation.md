@@ -130,11 +130,11 @@
 - Consumes: `variable_key(label)`.
 - Produces: `canonicalize_frame_columns(frame)` that renames the actual pandas frame with the same collision-safe keys used by profiling.
 
-- [ ] Add a direct data-intake test for numeric `2026`, literal `int:2026`, and literal `str:int:2026` headers; assert three distinct canonical frame columns.
-- [ ] Add a service integration test that plans and executes against one of those canonical identifiers.
-- [ ] Run them to observe RED because execution still has raw pandas labels.
-- [ ] Implement `canonicalize_frame_columns()` with duplicate-key detection and use it in `_read_frame()` before approved-kind coercion.
-- [ ] Run data-intake, planner, service-security, and reference-analysis suites.
+- [x] Add a direct data-intake test for numeric `2026`, literal `int:2026`, and literal `str:int:2026` headers; assert three distinct canonical frame columns.
+- [x] Add a service integration test that plans and executes against one of those canonical identifiers.
+- [x] Run them to observe RED because execution still has raw pandas labels.
+- [x] Implement `canonicalize_frame_columns()` with duplicate-key detection and use it in `_read_frame()` before approved-kind coercion.
+- [x] Run data-intake, planner, service-security, and reference-analysis suites.
 
 ### Task 7: Pin the sidecar build to Python 3.12
 

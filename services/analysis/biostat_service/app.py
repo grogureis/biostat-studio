@@ -22,7 +22,7 @@ from uvicorn import Config, Server
 
 from .analyses import AnalysisBundle, run_plan
 from .contracts import AnalysisPlan, StudyBrief, VariableRole
-from .data_intake import DataProfile, profile_excel
+from .data_intake import DataProfile, canonicalize_frame_columns, profile_excel
 from .jobs import JobManager, JobState, StagedJobResult
 from .planner import build_plan
 from .projects import (
@@ -387,7 +387,7 @@ def _read_frame(context: ProjectContext) -> pd.DataFrame:
     frame = pd.read_excel(source, sheet_name=context.profile.selected_sheet)
     if sha256(source.read_bytes()).hexdigest() != before:
         raise ValueError("source_file_changed")
-    return _apply_approved_kinds(frame, context)
+    return _apply_approved_kinds(canonicalize_frame_columns(frame), context)
 
 
 def _get_context(projects: dict[UUID, ProjectContext], project_id: UUID) -> ProjectContext:

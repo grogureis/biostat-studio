@@ -854,6 +854,87 @@ def test_approved_categorical_kind_preserves_missingness_during_coercion() -> No
     assert str(converted["mixed_group"].dtype) == "string"
 
 
+def test_analysis_executes_with_collision_safe_numeric_header_identifiers(
+    client, tmp_path: Path
+) -> None:
+    workbook_path = tmp_path / "header-collision.xlsx"
+    workbook = Workbook()
+    workbook.active.append([2026, "int:2026"])
+    for index in range(12):
+        workbook.active.append(
+            [index + 1, "control" if index < 6 else "treated"]
+        )
+    workbook.save(workbook_path)
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {
+        "title": "Header identity",
+        "question": "Is the numeric-header outcome different between groups?",
+        "hypothesis": "The confirmed groups have different outcomes.",
+        "design": "cohort",
+        "outcome_variables": ["int:2026"],
+        "exposure_variables": ["str:int:2026"],
+    }
+    created = client.post(
+        "/v1/projects",
+        headers=headers,
+        json={
+            "source_path": str(workbook_path),
+            "project_root": str(tmp_path / "header-collision.biostat"),
+            "brief": brief,
+        },
+    ).json()
+    assert set(created["profile"]["variables"]) == {"int:2026", "str:int:2026"}
+    project_id = created["id"]
+    roles = [
+        {
+            "name": "int:2026",
+            "role": "outcome",
+            "kind": "continuous",
+            "confirmed": True,
+        },
+        {
+            "name": "str:int:2026",
+            "role": "exposure",
+            "kind": "binary",
+            "confirmed": True,
+        },
+    ]
+    assert client.post(
+        f"/v1/projects/{project_id}/data-approval",
+        headers=headers,
+        json={"roles": roles},
+    ).status_code == 200
+    plan = client.post(
+        "/v1/plans", headers=headers, json={"project_id": project_id}
+    ).json()
+    assert plan["blocking_errors"] == []
+    assert client.post(
+        "/v1/plans/approval",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "revision": plan["revision"],
+            "digest": plan["digest"],
+        },
+    ).status_code == 200
+    queued = client.post(
+        "/v1/jobs",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "approved_plan_revision": plan["revision"],
+            "approved_plan_digest": plan["digest"],
+        },
+    ).json()
+    terminal = client.app.state.job_manager.wait(UUID(queued["id"]), timeout=5)
+
+    assert terminal.status == "completed"
+    primary = next(
+        result for result in terminal.result["results"] if result["id"] == "primary_outcome"
+    )
+    assert primary["n"] == 12
+
+
 def test_v1_rejects_non_loopback_client(monkeypatch):
     monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
     with TestClient(create_app(), client=("192.0.2.1", 5000)) as remote_client:
