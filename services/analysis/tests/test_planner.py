@@ -656,6 +656,128 @@ def test_free_text_cannot_change_a_confirmed_structured_decision() -> None:
     assert first == second
 
 
+def test_method_override_selects_the_documented_alternative() -> None:
+    """A confirmed alternative selection must swap the executable method contract."""
+    plan = build_plan(
+        brief(),
+        core_profile(),
+        roles(),
+        method_overrides={"primary_outcome": "mann_whitney_u"},
+    )
+
+    assert plan.blocking_errors == []
+    primary = plan.items[-1]
+    assert primary.method == "mann_whitney_u"
+    assert primary.robust_alternative == "welch_t_test"
+    assert "effect_size:rank_biserial_r" in primary.outputs
+    assert "Hodges" in primary.estimand
+    assert any("tie" in assumption.lower() for assumption in primary.assumptions)
+
+
+def test_method_override_to_the_primary_method_is_identity() -> None:
+    """Re-selecting the already-planned method must not change the plan."""
+    baseline = build_plan(brief(), core_profile(), roles())
+    unchanged = build_plan(
+        brief(),
+        core_profile(),
+        roles(),
+        method_overrides={"primary_outcome": "welch_t_test"},
+    )
+
+    assert unchanged == baseline
+
+
+def test_method_override_outside_the_documented_pair_fails_closed() -> None:
+    """Free method selection would bypass the deterministic planning rules."""
+    plan = build_plan(
+        brief(),
+        core_profile(),
+        roles(),
+        method_overrides={"primary_outcome": "logistic_regression"},
+    )
+
+    assert plan.items == []
+    assert plan.blocking_errors == ["invalid_method_override:primary_outcome"]
+
+    unknown_item = build_plan(
+        brief(),
+        core_profile(),
+        roles(),
+        method_overrides={"secondary_outcome": "mann_whitney_u"},
+    )
+    assert unknown_item.items == []
+    assert unknown_item.blocking_errors == ["unknown_override_item:secondary_outcome"]
+
+
+def test_kruskal_override_carries_the_holm_multiplicity_contract() -> None:
+    """Pairwise post-hoc contrasts require an explicit adjustment strategy."""
+    profile = core_profile()
+    profile.variables["treatment_group"] = metadata(
+        "treatment_group", "categorical", unique_values=3
+    )
+    selected_roles = roles()
+    selected_roles["treatment_group"] = VariableRole(
+        name="treatment_group", role="exposure", kind="categorical", confirmed=True
+    )
+
+    plan = build_plan(
+        brief(),
+        profile,
+        selected_roles,
+        method_overrides={"primary_outcome": "kruskal_wallis"},
+    )
+
+    primary = plan.items[-1]
+    assert primary.method == "kruskal_wallis"
+    assert primary.robust_alternative == "welch_anova"
+    assert primary.multiplicity_strategy == "dunn_pairwise_holm_adjusted"
+    assert "effect_size:rank_epsilon_squared" in primary.outputs
+    assert "table:multi_group_comparison_with_posthoc" in primary.outputs
+
+
+def test_pearson_choice_documents_spearman_alternative_and_override() -> None:
+    """The correlation rule must document and accept the rank-based alternative."""
+    profile = profile_with_continuous_exposure()
+    selected_roles = roles()
+    selected_roles["baseline_score"] = VariableRole(
+        name="baseline_score", role="exposure", kind="continuous", confirmed=True
+    )
+
+    documented = build_plan(
+        brief(exposures=["baseline_score"]), profile, selected_roles
+    )
+    assert documented.items[-1].method == "pearson_or_spearman"
+    assert documented.items[-1].robust_alternative == "spearman_rank"
+
+    overridden = build_plan(
+        brief(exposures=["baseline_score"]),
+        profile,
+        selected_roles,
+        method_overrides={"primary_outcome": "spearman_rank"},
+    )
+    primary = overridden.items[-1]
+    assert primary.method == "spearman_rank"
+    assert primary.robust_alternative == "pearson_or_spearman"
+    assert "effect_size:spearman_rho" in primary.outputs
+
+
+def test_wilcoxon_override_keeps_pair_variables_and_paired_contract() -> None:
+    """The paired rank alternative must keep pair linkage requirements intact."""
+    plan = build_plan(
+        brief(design="repeated", pair_id="participant_id"),
+        core_profile(),
+        roles_with_pair_id(),
+        method_overrides={"primary_outcome": "wilcoxon_signed_rank"},
+    )
+
+    primary = plan.items[-1]
+    assert primary.method == "wilcoxon_signed_rank"
+    assert primary.robust_alternative == "paired_t_test"
+    assert "participant_id" in primary.required_variables
+    assert "effect_size:matched_rank_biserial_r" in primary.outputs
+    assert any("zero" in assumption.lower() for assumption in primary.assumptions)
+
+
 def test_profile_warnings_are_propagated_without_patient_row_values() -> None:
     """Warnings must remain actionable without copying source-cell values into a plan."""
     profile = core_profile(

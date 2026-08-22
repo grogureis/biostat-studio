@@ -205,6 +205,81 @@ def _method_contract(
             "table": "categorical_association",
             "figure": "categorical_effect",
         },
+        "mann_whitney_u": {
+            "estimand": (
+                "Hodges–Lehmann location shift in the outcome between the two "
+                "independent groups."
+            ),
+            "rationale": (
+                "The confirmed rank-based alternative estimates a distribution-free "
+                "location shift between two independent groups without a normality "
+                "requirement."
+            ),
+            "assumptions": [
+                "Observations are independent within and between confirmed groups.",
+                "Interpret the location shift only when the group distributions have similar shapes.",
+                "Check ties and heavy discreteness; the exact p-value path requires untied values.",
+            ],
+            "effect": "rank_biserial_r",
+            "table": "two_group_comparison",
+            "figure": "group_distribution_and_effect",
+        },
+        "wilcoxon_signed_rank": {
+            "estimand": (
+                "Pseudomedian of within-pair differences in the confirmed continuous "
+                "outcome."
+            ),
+            "rationale": (
+                "The confirmed rank-based alternative tests within-pair change "
+                "without a normality requirement for the pair differences."
+            ),
+            "assumptions": [
+                "Pairs are correctly linked and independent of other pairs.",
+                "The within-pair difference distribution is symmetric under the null hypothesis.",
+                "Zero within-pair differences are excluded from the test and reported explicitly.",
+            ],
+            "effect": "matched_rank_biserial_r",
+            "table": "paired_comparison",
+            "figure": "paired_difference_and_effect",
+        },
+        "kruskal_wallis": {
+            "estimand": (
+                "Difference in outcome distributions across the confirmed "
+                "independent groups."
+            ),
+            "rationale": (
+                "The confirmed rank-based alternative compares more than two "
+                "independent groups without a normality requirement; pairwise Dunn "
+                "contrasts are reported with a Holm adjustment."
+            ),
+            "assumptions": [
+                "Observations are independent within and between confirmed groups.",
+                "Interpret group location differences only when distribution shapes are similar.",
+                "Interpret Holm-adjusted pairwise contrasts together with the omnibus result.",
+            ],
+            "effect": "rank_epsilon_squared",
+            "table": "multi_group_comparison_with_posthoc",
+            "figure": "group_distribution_and_effect",
+            "multiplicity": "dunn_pairwise_holm_adjusted",
+        },
+        "spearman_rank": {
+            "estimand": (
+                "Monotonic association between the two confirmed continuous "
+                "variables."
+            ),
+            "rationale": (
+                "The confirmed rank-based alternative estimates Spearman correlation "
+                "for a monotonic association without a linearity requirement."
+            ),
+            "assumptions": [
+                "Observations are paired by row and independent across rows.",
+                "Check monotonicity, missingness, and influential observations before interpretation.",
+                "Heavy ties reduce the precision of the rank correlation.",
+            ],
+            "effect": "spearman_rho",
+            "table": "correlation_estimate",
+            "figure": "association_scatter",
+        },
         "pearson_or_spearman": {
             "estimand": "Strength and direction of association between two continuous variables.",
             "rationale": (
@@ -287,7 +362,9 @@ def _inferential_item(
         required_variables=variables,
         assumptions=list(contract["assumptions"]),
         robust_alternative=choice.robust_alternative,
-        multiplicity_strategy="not_applicable_single_primary_analysis",
+        multiplicity_strategy=str(
+            contract.get("multiplicity", "not_applicable_single_primary_analysis")
+        ),
         outputs=[
             f"effect_size:{contract['effect']}",
             "confidence_interval:95_percent",
@@ -347,16 +424,47 @@ def _primary_choice(
         groups = profile.variables[exposure].unique_values
         return choose_group_method(outcome_kind, groups, paired=False)
     if exposure_kind == "continuous" and outcome_kind == "continuous":
-        return PlanChoice("pearson_or_spearman")
+        return PlanChoice("pearson_or_spearman", "spearman_rank")
     if exposure_kind == "continuous" and outcome_kind == "binary":
         return PlanChoice("logistic_regression")
     raise BlockingPlanError("unsupported_or_unconfirmed_design")
+
+
+def _apply_method_overrides(
+    items: list[PlanItem],
+    method_overrides: dict[str, str],
+    warnings: list[str],
+    *,
+    adjusted: bool,
+) -> list[str]:
+    """Swap plan items to their documented alternatives; report violations."""
+    errors: list[str] = []
+    by_id = {planned.id: planned for planned in items}
+    for item_id, requested in method_overrides.items():
+        target = by_id.get(item_id)
+        if target is None:
+            errors.append(f"unknown_override_item:{item_id}")
+            continue
+        if requested == target.method:
+            continue
+        if target.robust_alternative is None or requested != target.robust_alternative:
+            errors.append(f"invalid_method_override:{item_id}")
+            continue
+        replacement = _inferential_item(
+            PlanChoice(requested, target.method),
+            list(target.required_variables),
+            warnings,
+            adjusted=adjusted,
+        )
+        items[items.index(target)] = replacement
+    return errors
 
 
 def build_plan(
     brief: StudyBrief,
     profile: DataProfile,
     roles: dict[str, VariableRole],
+    method_overrides: dict[str, str] | None = None,
 ) -> AnalysisPlan:
     """Build a versioned plan without inferring methods from free text."""
     warnings = _profile_warnings(profile) + _approved_kind_warnings(profile, roles)
@@ -448,4 +556,14 @@ def build_plan(
                 adjusted=bool(brief.covariates),
             )
         )
+    if method_overrides:
+        override_errors = _apply_method_overrides(
+            items, method_overrides, warnings, adjusted=bool(brief.covariates)
+        )
+        if override_errors:
+            return AnalysisPlan(
+                version=PLAN_VERSION,
+                blocking_errors=_ordered_unique(override_errors),
+                warnings=warnings,
+            )
     return AnalysisPlan(version=PLAN_VERSION, items=items, warnings=warnings)

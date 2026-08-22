@@ -20,6 +20,7 @@ VERTICAL_SLICE_METHOD_IDS = frozenset(
         "kruskal_wallis",
         "chi_square_or_fisher",
         "pearson_or_spearman",
+        "spearman_rank",
         "linear_regression",
         "logistic_regression",
     }
