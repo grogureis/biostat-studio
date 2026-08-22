@@ -23,6 +23,7 @@ from uvicorn import Config, Server
 from .analyses import AnalysisBundle, run_plan
 from .contracts import AnalysisPlan, StudyBrief, VariableRole
 from .data_intake import DataProfile, canonicalize_frame_columns, profile_excel
+from .power import PowerRequest, PowerValidationError, compute_power
 from .jobs import JobManager, JobState, StagedJobResult
 from .planner import build_plan
 from .projects import (
@@ -481,6 +482,14 @@ def create_app() -> FastAPI:
     @v1.get("/session")
     def session() -> dict[str, int]:
         return {"api": API_VERSION}
+
+    @v1.post("/power")
+    def power_calculation(request: PowerRequest) -> dict[str, Any]:
+        try:
+            result = compute_power(request)
+        except PowerValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return result.model_dump(mode="json")
 
     @v1.post("/data/profile")
     def data_profile(request: DataProfileRequest) -> dict[str, Any]:
