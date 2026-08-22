@@ -8,7 +8,7 @@ export interface AnalysisApi {
   createPlan(brief: StudyBrief): Promise<AnalysisPlan>;
   approvePlan(plan: AnalysisPlan): Promise<void>;
   runAnalysis(plan: AnalysisPlan, onProgress?: (progress: JobProgress) => void): Promise<AnalysisResult[]>;
-  cancelAnalysis(): Promise<void>;
+  cancelAnalysis(): Promise<JobResponse | null>;
   invalidateProject(): void;
   exportReport(results: AnalysisResult[], language: Language): Promise<string | null>;
 }
@@ -46,7 +46,7 @@ type BiostatWindowBridge = Pick<
   "selectDataFile" | "selectProject" | "selectReportDestination" | "requestApi"
 >;
 
-interface JobResponse {
+export interface JobResponse {
   id: string;
   status: "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
   result: { results?: AnalysisResult[]; warnings?: unknown[] } | null;
@@ -120,7 +120,9 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
   const waitForTerminal = (jobId: string, onProgress?: (progress: JobProgress) => void): Promise<JobResponse> => {
     return (async () => {
       let consecutiveFailures = 0;
-      for (let attempts = 0; attempts < 900; attempts += 1) {
+      let delay = 100;
+      const deadline = Date.now() + 90_000;
+      while (Date.now() < deadline) {
         try {
           const job = await send<JobResponse>(`/v1/jobs/${jobId}`);
           consecutiveFailures = 0;
@@ -135,8 +137,8 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
           consecutiveFailures += 1;
           if (consecutiveFailures >= 5) throw error;
         }
-        const delay = Math.min(100 * (2 ** Math.min(consecutiveFailures, 4)), 2_000);
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 2_000);
       }
       throw new AnalysisApiError("analysis_timeout", "The local analysis service did not reach a terminal state in time.");
     })();
@@ -210,18 +212,21 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
       }
     },
     cancelAnalysis: async () => {
-      if (!activeJobId) return;
+      if (!activeJobId) return null;
       const jobId = activeJobId;
       await send<JobResponse>(`/v1/jobs/${jobId}/cancel`, {});
+      let terminal: JobResponse;
       if (activeTerminal) {
-        await activeTerminal;
+        terminal = await activeTerminal;
       } else {
-        const terminal = await waitForTerminal(jobId);
+        terminal = await waitForTerminal(jobId);
         if (!["completed", "failed", "cancelled"].includes(terminal.status)) {
           throw new AnalysisApiError("cancellation_failed", "Cancellation did not reach a terminal state.");
         }
-        if (activeJobId === jobId) activeJobId = null;
       }
+      if (terminal.status === "completed") completedJobId = jobId;
+      if (activeJobId === jobId) activeJobId = null;
+      return terminal;
     },
     invalidateProject,
     exportReport: async (_results: AnalysisResult[], language: Language) => {

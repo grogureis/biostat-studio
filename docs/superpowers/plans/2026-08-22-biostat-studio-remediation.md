@@ -94,12 +94,12 @@
 - Consumes: terminal `JobResponse` from `waitForTerminal(jobId)`.
 - Produces: `cancelAnalysis(): Promise<JobResponse | null>`; UI branches on `cancelled`, `completed`, or `failed`.
 
-- [ ] Add a client test asserting cancellation returns the terminal completed job when completion wins the race.
-- [ ] Add an App test asserting that the same race shows completed results and never displays a cancellation notice.
-- [ ] Run both to observe RED because `cancelAnalysis()` returns `void` and App always clears results.
-- [ ] Return the authoritative terminal job from the client and make App apply each terminal status explicitly.
-- [ ] Replace constant 100 ms polling with bounded exponential delays while preserving the existing terminal deadline and progress callbacks.
-- [ ] Run focused client/App tests, then the complete desktop suite and typecheck.
+- [x] Add a client test asserting cancellation returns the terminal completed job when completion wins the race.
+- [x] Add an App test asserting that the same race shows completed results and never displays a cancellation notice.
+- [x] Run both to observe RED because `cancelAnalysis()` returns `void` and App always clears results.
+- [x] Return the authoritative terminal job from the client and make App apply each terminal status explicitly.
+- [x] Replace constant 100 ms polling with bounded exponential delays while preserving the existing terminal deadline and progress callbacks.
+- [x] Run focused client/App tests, then the complete desktop suite and typecheck.
 
 ### Task 5: Map diagnostics emitted by real analysis producers
 

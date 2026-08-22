@@ -113,9 +113,82 @@ describe("authenticated loopback API client", () => {
     expect(cancelResolved).toBe(false);
     releaseRunning({ ok: true, status: 200, body: { id: "job-1", status: "cancelling", progress: 45, result: null } });
 
-    await expect(cancelling).resolves.toBeUndefined();
+    await expect(cancelling).resolves.toMatchObject({ id: "job-1", status: "cancelled" });
     await expect(run).rejects.toMatchObject({ code: "cancelled" });
     expect(requestApi.mock.calls.map(([request]) => request.path)).toContain("/v1/jobs/job-1/cancel");
+  });
+
+  it("returns the authoritative completed job when completion wins cancellation", async () => {
+    let releasePoll!: (value: { ok: boolean; status: number; body: unknown }) => void;
+    const pendingPoll = new Promise<{ ok: boolean; status: number; body: unknown }>((resolve) => {
+      releasePoll = resolve;
+    });
+    const requestApi = vi.fn((request: { path: string }) => {
+      if (request.path === "/v1/projects/open") return Promise.resolve({ ok: true, status: 200, body: { id: "project-1", brief, roles: [], plan, approved_plan: true, completed_job_id: null, results: [] } });
+      if (request.path === "/v1/jobs") return Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "queued", result: null } });
+      if (request.path === "/v1/jobs/job-1/cancel") return Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "cancelling", result: null } });
+      return pendingPoll;
+    });
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn(),
+      selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    });
+    await api.openProject!();
+    const running = api.runAnalysis(plan);
+    await vi.waitFor(() => expect(requestApi).toHaveBeenCalledWith(expect.objectContaining({ path: "/v1/jobs/job-1" })));
+
+    const cancelling = api.cancelAnalysis();
+    await vi.waitFor(() => expect(requestApi).toHaveBeenCalledWith(expect.objectContaining({ path: "/v1/jobs/job-1/cancel" })));
+    releasePoll({
+      ok: true,
+      status: 200,
+      body: { id: "job-1", status: "completed", progress: 100, message: "Published.", error_code: null, result: { results: [], warnings: [] } },
+    });
+
+    await expect(cancelling).resolves.toMatchObject({ id: "job-1", status: "completed" });
+    await expect(running).resolves.toEqual([]);
+  });
+
+  it("backs off successful non-terminal polling instead of polling every 100 ms", async () => {
+    vi.useFakeTimers();
+    try {
+      let polls = 0;
+      const requestApi = vi.fn((request: { path: string }) => {
+        if (request.path === "/v1/projects/open") return Promise.resolve({ ok: true, status: 200, body: { id: "project-1", brief, roles: [], plan, approved_plan: true, completed_job_id: null, results: [] } });
+        if (request.path === "/v1/jobs") return Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "queued", result: null } });
+        polls += 1;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          body: polls < 3
+            ? { id: "job-1", status: "running", progress: polls * 10, result: null }
+            : { id: "job-1", status: "completed", progress: 100, error_code: null, result: { results: [], warnings: [] } },
+        });
+      });
+      const api = createAnalysisApi({
+        selectDataFile: vi.fn(),
+        selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }),
+        selectReportDestination: vi.fn(),
+        requestApi,
+      });
+      await api.openProject!();
+      const running = api.runAnalysis(plan);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(polls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(polls).toBe(2);
+      await vi.advanceTimersByTimeAsync(199);
+      expect(polls).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(running).resolves.toEqual([]);
+      expect(polls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cooperatively cancels an active job when project inputs are invalidated", async () => {

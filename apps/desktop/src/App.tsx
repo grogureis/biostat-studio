@@ -91,8 +91,23 @@ export function App({ api }: { api: AnalysisApi }) {
 
   const cancel = async () => {
     ++runId.current;
-    await api.cancelAnalysis();
-    setRunning(false); setCancelled(true); project.setResults([]);
+    const terminal = await api.cancelAnalysis();
+    setRunning(false);
+    if (!terminal) return;
+    if (terminal.status === "completed") {
+      setCancelled(false);
+      setFailedOperation(null);
+      project.setResults(terminal.result?.results ?? []);
+      project.setActiveStep("results");
+      return;
+    }
+    if (terminal.status === "failed") {
+      setCancelled(false);
+      project.setResults([]);
+      setFailedOperation("analysis");
+      return;
+    }
+    setCancelled(true); project.setResults([]);
   };
 
   const invalidateTransientState = () => {

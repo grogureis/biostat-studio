@@ -74,7 +74,7 @@ function fakeApi(overrides: Partial<AnalysisApi> = {}): AnalysisApi {
     createPlan: vi.fn().mockResolvedValue(plan),
     approvePlan: vi.fn().mockResolvedValue(undefined),
     runAnalysis: vi.fn().mockResolvedValue([result]),
-    cancelAnalysis: vi.fn().mockResolvedValue(undefined),
+    cancelAnalysis: vi.fn().mockResolvedValue(null),
     invalidateProject: vi.fn(),
     exportReport: vi.fn().mockResolvedValue("/Users/research/Results.docx"),
     ...overrides,
@@ -138,6 +138,7 @@ describe("Clinical Calm workflow", () => {
         onProgress?.({ status: "running", progress: 35, message: "Running approved methods.", errorCode: null });
         return pending.promise;
       }),
+      cancelAnalysis: vi.fn().mockResolvedValue({ id: "job-1", status: "cancelled", result: null, progress: 100, error_code: null, message: null }),
     });
     const user = userEvent.setup();
     render(<App api={api} />);
@@ -154,6 +155,31 @@ describe("Clinical Calm workflow", () => {
     expect(api.cancelAnalysis).toHaveBeenCalledOnce();
     expect(await screen.findByRole("status")).toHaveTextContent("Analysis cancelled. No partial results were accepted.");
     expect(screen.queryByRole("heading", { name: "Results" })).not.toBeInTheDocument();
+  });
+
+  it("shows completed results when completion wins the cancellation race", async () => {
+    const pending = deferred<AnalysisResult[]>();
+    const api = fakeApi({
+      runAnalysis: vi.fn(() => pending.promise),
+      cancelAnalysis: vi.fn().mockResolvedValue({
+        id: "job-1",
+        status: "completed",
+        result: { results: [result], warnings: [] },
+        progress: 100,
+        error_code: null,
+        message: "Published.",
+      }),
+    });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await openApprovedDataPlan(user);
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Run analysis" }));
+    await user.click(screen.getByRole("button", { name: "Cancel analysis" }));
+
+    expect(await screen.findByRole("heading", { name: "Results" })).toBeInTheDocument();
+    expect(screen.queryByText("Analysis cancelled. No partial results were accepted.")).not.toBeInTheDocument();
   });
 
   it("shows actionable non-color-only errors and retries the failed analysis", async () => {
