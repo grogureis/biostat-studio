@@ -1,11 +1,12 @@
-import type { AnalysisPlan, AnalysisResult, DataProfile, Language, StudyBrief, VariableRole } from "./types";
+import type { AnalysisPlan, AnalysisResult, DataProfile, Language, PowerRequest, PowerResponse, StudyBrief, VariableRole } from "./types";
 
 export interface AnalysisApi {
   openProject?(): Promise<OpenProjectSnapshot | null>;
   selectDataFile(): Promise<string | null>;
   profileData?(): Promise<DataProfile>;
   approveDataStructure(brief: StudyBrief, roles?: VariableRole[]): Promise<void>;
-  createPlan(brief: StudyBrief): Promise<AnalysisPlan>;
+  createPlan(brief: StudyBrief, methodOverrides?: Record<string, string>): Promise<AnalysisPlan>;
+  computePower(request: PowerRequest): Promise<PowerResponse>;
   approvePlan(plan: AnalysisPlan): Promise<void>;
   runAnalysis(plan: AnalysisPlan, onProgress?: (progress: JobProgress) => void): Promise<AnalysisResult[]>;
   cancelAnalysis(): Promise<JobResponse | null>;
@@ -178,8 +179,14 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
       projectId = project.id;
       await send<{ approved: boolean }>(`/v1/projects/${project.id}/data-approval`, { roles });
     },
-    createPlan: async (_brief: StudyBrief) => {
-      return send<AnalysisPlan>("/v1/plans", { project_id: requireProject() });
+    createPlan: async (_brief: StudyBrief, methodOverrides: Record<string, string> = {}) => {
+      return send<AnalysisPlan>("/v1/plans", {
+        project_id: requireProject(),
+        method_overrides: methodOverrides,
+      });
+    },
+    computePower: async (request: PowerRequest) => {
+      return send<PowerResponse>("/v1/power", request);
     },
     approvePlan: async (plan: AnalysisPlan) => {
       await send<{ approved: boolean }>("/v1/plans/approval", {

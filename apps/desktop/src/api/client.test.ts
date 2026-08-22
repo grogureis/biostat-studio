@@ -76,6 +76,38 @@ describe("authenticated loopback API client", () => {
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ progress: 45, message: "Running approved methods." }));
   });
 
+  it("computes power statelessly and sends plan method overrides", async () => {
+    const requestApi = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { analysis: "two_sample_t", per_group_rounded: 64 } })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { id: "project-1", profile: { rows: 12 } } })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { approved: true } })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: plan });
+    const bridge = {
+      selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    };
+    const api = createAnalysisApi(bridge);
+
+    await expect(api.computePower({
+      analysis: "two_sample_t", solve_for: "sample_size", alpha: 0.05, power: 0.8, effect_size: 0.5,
+    })).resolves.toMatchObject({ per_group_rounded: 64 });
+    expect(requestApi.mock.calls[0][0]).toMatchObject({
+      path: "/v1/power",
+      method: "POST",
+      body: { analysis: "two_sample_t", solve_for: "sample_size" },
+    });
+
+    await api.selectDataFile();
+    await api.approveDataStructure(brief);
+    await api.createPlan(brief, { primary_outcome: "mann_whitney_u" });
+    expect(requestApi.mock.calls[3][0]).toMatchObject({
+      path: "/v1/plans",
+      body: { project_id: "project-1", method_overrides: { primary_outcome: "mann_whitney_u" } },
+    });
+  });
+
   it("cancels the active job and never returns partial results", async () => {
     const requestApi = vi.fn().mockResolvedValue({ ok: true, status: 200, body: { id: "job-1", status: "cancelled", result: null } });
     const api = createAnalysisApi({

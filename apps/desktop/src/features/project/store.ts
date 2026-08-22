@@ -3,7 +3,7 @@ import { useReducer } from "react";
 import type { AnalysisPlan, AnalysisResult, Language, StudyBrief } from "../../api/types";
 import type { OpenProjectSnapshot } from "../../api/client";
 
-export type WorkflowStep = "study" | "data" | "plan" | "run" | "results" | "report";
+export type WorkflowStep = "study" | "data" | "plan" | "run" | "results" | "report" | "power";
 
 const emptyBrief: StudyBrief = {
   title: "",

@@ -7,6 +7,7 @@ interface PlanReviewProps {
   loading: boolean;
   onApproval(next: boolean): void;
   onRun(): void;
+  onAlternative(itemId: string, method: string): void;
 }
 
 const copy = {
@@ -20,6 +21,8 @@ const copy = {
     blocked: "Resolve the blocking items before approving this plan.",
     assumptions: "Assumptions to review",
     alternative: "Documented alternative (not automatically executed)",
+    useAlternative: "Use this alternative (regenerate plan)",
+    alternativeHelp: "Switching regenerates the plan and requires a new approval.",
   },
   tr: {
     eyebrow: "03 / Karar kaydı",
@@ -31,10 +34,12 @@ const copy = {
     blocked: "Bu planı onaylamadan önce engelleyici maddeleri çözün.",
     assumptions: "Gözden geçirilecek varsayımlar",
     alternative: "Belgelenmiş alternatif (otomatik yürütülmez)",
+    useAlternative: "Bu alternatifi kullan (planı yeniden oluştur)",
+    alternativeHelp: "Geçiş planı yeniden oluşturur ve yeni bir onay gerektirir.",
   },
 } as const;
 
-export function PlanReview({ language, plan, approved, loading, onApproval, onRun }: PlanReviewProps) {
+export function PlanReview({ language, plan, approved, loading, onApproval, onRun, onAlternative }: PlanReviewProps) {
   const text = copy[language];
   const blocking = plan?.blocking_errors ?? [];
 
@@ -53,7 +58,7 @@ export function PlanReview({ language, plan, approved, loading, onApproval, onRu
           <p>{item.rationale}</p>
           <div className="plan-detail-grid">
             <div><h3>{text.assumptions}</h3><ul>{item.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul></div>
-            {item.robust_alternative ? <div><h3>{text.alternative}</h3><p>{item.robust_alternative}</p></div> : null}
+            {item.robust_alternative ? <div><h3>{text.alternative}</h3><p>{item.robust_alternative}</p><button type="button" className="secondary-action" disabled={loading} onClick={() => onAlternative(item.id, item.robust_alternative as string)}>{text.useAlternative}</button><p className="microcopy">{text.alternativeHelp}</p></div> : null}
           </div>
           {item.warnings.map((warning) => <p className="warning-line" key={warning}><span aria-hidden="true">!</span>{warning}</p>)}
         </article>

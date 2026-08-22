@@ -67,6 +67,39 @@ export interface AnalysisPlan {
   warnings: string[];
 }
 
+export type PowerAnalysis =
+  | "two_sample_t"
+  | "paired_t"
+  | "one_way_anova"
+  | "two_proportions"
+  | "correlation";
+
+export interface PowerRequest {
+  analysis: PowerAnalysis;
+  solve_for: "power" | "sample_size";
+  alpha: number;
+  power?: number | null;
+  effect_size?: number | null;
+  proportion_one?: number | null;
+  proportion_two?: number | null;
+  sample_size?: number | null;
+  groups?: number;
+}
+
+export interface PowerResponse {
+  analysis: PowerAnalysis;
+  solve_for: "power" | "sample_size";
+  inputs: Record<string, number>;
+  sample_size_unit: "per_group" | "pairs" | "total";
+  power: number | null;
+  sample_size: number | null;
+  per_group_rounded: number | null;
+  total_rounded: number | null;
+  achieved_power: number | null;
+  method: string;
+  library_versions: Record<string, string>;
+}
+
 export interface ConfidenceInterval {
   level: number;
   lower: number | null;

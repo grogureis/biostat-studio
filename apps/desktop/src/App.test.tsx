@@ -63,9 +63,24 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+const powerResponse = {
+  analysis: "two_sample_t" as const,
+  solve_for: "sample_size" as const,
+  inputs: { alpha: 0.05, standardized_effect_size: 0.5, target_power: 0.8 },
+  sample_size_unit: "per_group" as const,
+  power: null,
+  sample_size: 63.765611775409695,
+  per_group_rounded: 64,
+  total_rounded: 128,
+  achieved_power: 0.8014595500498423,
+  method: "statsmodels_power_solver:cohen_d",
+  library_versions: { python: "3.12.14" },
+};
+
 function fakeApi(overrides: Partial<AnalysisApi> = {}): AnalysisApi {
   return {
     selectDataFile: vi.fn().mockResolvedValue("/Users/research/core-study.xlsx"),
+    computePower: vi.fn().mockResolvedValue(powerResponse),
     profileData: vi.fn().mockResolvedValue({ rows: 12, columns: 2, missing_cells: 0, sheets: ["Sheet1"], selected_sheet: "Sheet1", variables: {
       treatment: { display_name: "Treatment", kind: "binary", non_missing: 12, missing: 0, unique_values: 2 },
       systolic_bp: { display_name: "Systolic bp", kind: "continuous", non_missing: 12, missing: 0, unique_values: 12 },
@@ -115,12 +130,12 @@ describe("Clinical Calm workflow", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Safe diagnostic category: separation.");
     expect(screen.queryByRole("heading", { name: "Results" })).not.toBeInTheDocument();
   });
-  it("presents six semantic stages and requires plan approval before analysis", async () => {
+  it("presents seven semantic stages and requires plan approval before analysis", async () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);
 
     expect(screen.getByRole("navigation", { name: "Analysis workflow" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /^(Study brief|Data & variables|Analysis plan|Run & diagnose|Results review|Word report)$/ })).toHaveLength(6);
+    expect(screen.getAllByRole("button", { name: /^(Study brief|Data & variables|Analysis plan|Run & diagnose|Results review|Word report|Power & sample size)$/ })).toHaveLength(7);
     expect(screen.getByText("Offline · data stays on this Mac")).toBeInTheDocument();
 
     await openApprovedDataPlan(user);
@@ -219,7 +234,7 @@ describe("Clinical Calm workflow", () => {
     await openApprovedDataPlan(user, "tr");
     expect(await screen.findByText("Welch independent-samples t-test")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Belgelenmiş alternatif (otomatik yürütülmez)" })).toBeInTheDocument();
-    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ language: "en" }));
+    expect(api.createPlan).toHaveBeenCalledWith(expect.objectContaining({ language: "en" }), {});
     expect(api.invalidateProject).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("checkbox", { name: "Bu planı onayla" }));
@@ -334,6 +349,71 @@ describe("Clinical Calm workflow", () => {
     await user.click(screen.getByRole("button", { name: "Retry Word export" }));
     expect(api.exportReport).toHaveBeenCalledTimes(2);
     expect(await screen.findByRole("status")).toHaveTextContent("Word report saved");
+  });
+
+  it("regenerates the plan with the documented alternative and clears approval", async () => {
+    const swapped: AnalysisPlan = {
+      ...plan,
+      items: [{
+        ...plan.items[0],
+        method: "Mann–Whitney U test",
+        robust_alternative: "Welch independent-samples t-test",
+      }],
+    };
+    const api = fakeApi({
+      createPlan: vi.fn().mockResolvedValueOnce(plan).mockResolvedValueOnce(swapped),
+    });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await openApprovedDataPlan(user);
+    await user.click(screen.getByRole("checkbox", { name: "Approve this plan" }));
+    await user.click(screen.getByRole("button", { name: "Use this alternative (regenerate plan)" }));
+
+    expect(await screen.findByRole("heading", { name: "Mann–Whitney U test" })).toBeInTheDocument();
+    expect(api.createPlan).toHaveBeenLastCalledWith(
+      expect.objectContaining({ language: "en" }),
+      { primary: "Mann–Whitney U test" },
+    );
+    expect(screen.getByRole("checkbox", { name: "Approve this plan" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Run analysis" })).toBeDisabled();
+  });
+
+  it("computes power and sample size without any project", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await user.click(screen.getByRole("button", { name: "Power & sample size" }));
+    expect(screen.getByRole("heading", { name: "Power & sample size" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Compute" }));
+
+    expect(api.computePower).toHaveBeenCalledWith(expect.objectContaining({
+      analysis: "two_sample_t",
+      solve_for: "sample_size",
+      alpha: 0.05,
+      power: 0.8,
+      effect_size: 0.5,
+    }));
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("64");
+    expect(status).toHaveTextContent("128");
+    expect(api.invalidateProject).not.toHaveBeenCalled();
+  });
+
+  it("localizes the power planner and shows a safe failure message", async () => {
+    const api = fakeApi({
+      computePower: vi.fn().mockRejectedValue(new AnalysisApiError("invalid_alpha", "invalid")),
+    });
+    const user = userEvent.setup();
+    render(<App api={api} />);
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Interface language" }), "tr");
+    await user.click(screen.getByRole("button", { name: "Güç ve örneklem" }));
+    expect(screen.getByRole("heading", { name: "Güç ve örneklem büyüklüğü" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hesapla" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Hesaplama tamamlanamadı");
   });
 
   it("handles a file-picker exception without exposing a path or crashing", async () => {

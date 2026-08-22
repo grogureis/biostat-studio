@@ -3,6 +3,7 @@ import { AnalysisApiError, type AnalysisApi } from "./api/client";
 import type { AnalysisResult, Language } from "./api/types";
 import { DataIntake } from "./features/data/DataIntake";
 import { PlanReview } from "./features/plan/PlanReview";
+import { PowerPlanner } from "./features/power/PowerPlanner";
 import { useProjectStore, type WorkflowStep } from "./features/project/store";
 import { ReportExport } from "./features/report/ReportExport";
 import { ResultsReview } from "./features/results/ResultsReview";
@@ -10,11 +11,11 @@ import { StudyBrief } from "./features/study/StudyBrief";
 import "./styles/clinical-calm.css";
 
 const labels = {
-  en: { navigation: "Analysis workflow", skip: "Skip to active task", language: "Interface language", offline: "Offline · data stays on this Mac", inspector: "Scientific inspector", methodNote: "METHOD NOTE", inspectorTitle: "Review before release", inspectorText: "Results remain observational unless the approved design and estimand justify a causal interpretation.", mode: "Mode", localOnly: "Local only", auditTrail: "Audit trail", enabled: "Enabled", inspectorWarnings: "Warnings to review", running: "Running approved analysis", progress: "Analysis progress", cancelled: "Analysis cancelled. No partial results were accepted.", ready: "Ready for a reviewed analysis.", runEyebrow: "04 / Reproducible execution", cancel: "Cancel analysis", failures: { plan: { title: "Analysis plan could not be completed", detail: "The local service did not return a complete, validated plan.", retry: "Retry plan generation" }, analysis: { title: "Analysis could not be completed", detail: "The local service did not return a complete, validated result.", retry: "Retry analysis" }, export: { title: "Word report could not be completed", detail: "The local service could not write a complete, validated Word report.", retry: "Retry Word export" } }, stages: { study: "Study brief", data: "Data & variables", plan: "Analysis plan", run: "Run & diagnose", results: "Results review", report: "Word report" } },
-  tr: { navigation: "Analiz iş akışı", skip: "Etkin göreve atla", language: "Arayüz dili", offline: "Çevrimdışı · veriler bu Mac'te kalır", inspector: "Bilimsel denetçi", methodNote: "YÖNTEM NOTU", inspectorTitle: "Yayımlamadan önce inceleyin", inspectorText: "Onaylanan tasarım ve tahmin edilen değer nedensel bir yorumu desteklemedikçe sonuçlar gözlemsel kalır.", mode: "Kip", localOnly: "Yerel kullanım", auditTrail: "Denetim kaydı", enabled: "Etkin", inspectorWarnings: "Gözden geçirilecek uyarılar", running: "Onaylanmış analiz çalışıyor", progress: "Analiz ilerlemesi", cancelled: "Analiz iptal edildi. Kısmi sonuç kabul edilmedi.", ready: "İncelenmiş analiz için hazır.", runEyebrow: "04 / Tekrarlanabilir yürütme", cancel: "Analizi iptal et", failures: { plan: { title: "Analiz planı tamamlanamadı", detail: "Yerel hizmet eksiksiz ve doğrulanmış bir plan döndürmedi.", retry: "Plan oluşturmayı yeniden dene" }, analysis: { title: "Analiz tamamlanamadı", detail: "Yerel hizmet eksiksiz ve doğrulanmış bir sonuç döndürmedi.", retry: "Analizi yeniden dene" }, export: { title: "Word raporu tamamlanamadı", detail: "Yerel hizmet eksiksiz ve doğrulanmış bir Word raporu yazamadı.", retry: "Word dışa aktarımını yeniden dene" } }, stages: { study: "Çalışma özeti", data: "Veri ve değişkenler", plan: "Analiz planı", run: "Çalıştır ve tanıla", results: "Sonuçları incele", report: "Word raporu" } },
+  en: { navigation: "Analysis workflow", skip: "Skip to active task", language: "Interface language", offline: "Offline · data stays on this Mac", inspector: "Scientific inspector", methodNote: "METHOD NOTE", inspectorTitle: "Review before release", inspectorText: "Results remain observational unless the approved design and estimand justify a causal interpretation.", mode: "Mode", localOnly: "Local only", auditTrail: "Audit trail", enabled: "Enabled", inspectorWarnings: "Warnings to review", running: "Running approved analysis", progress: "Analysis progress", cancelled: "Analysis cancelled. No partial results were accepted.", ready: "Ready for a reviewed analysis.", runEyebrow: "04 / Reproducible execution", cancel: "Cancel analysis", failures: { plan: { title: "Analysis plan could not be completed", detail: "The local service did not return a complete, validated plan.", retry: "Retry plan generation" }, analysis: { title: "Analysis could not be completed", detail: "The local service did not return a complete, validated result.", retry: "Retry analysis" }, export: { title: "Word report could not be completed", detail: "The local service could not write a complete, validated Word report.", retry: "Retry Word export" } }, stages: { study: "Study brief", data: "Data & variables", plan: "Analysis plan", run: "Run & diagnose", results: "Results review", report: "Word report", power: "Power & sample size" } },
+  tr: { navigation: "Analiz iş akışı", skip: "Etkin göreve atla", language: "Arayüz dili", offline: "Çevrimdışı · veriler bu Mac'te kalır", inspector: "Bilimsel denetçi", methodNote: "YÖNTEM NOTU", inspectorTitle: "Yayımlamadan önce inceleyin", inspectorText: "Onaylanan tasarım ve tahmin edilen değer nedensel bir yorumu desteklemedikçe sonuçlar gözlemsel kalır.", mode: "Kip", localOnly: "Yerel kullanım", auditTrail: "Denetim kaydı", enabled: "Etkin", inspectorWarnings: "Gözden geçirilecek uyarılar", running: "Onaylanmış analiz çalışıyor", progress: "Analiz ilerlemesi", cancelled: "Analiz iptal edildi. Kısmi sonuç kabul edilmedi.", ready: "İncelenmiş analiz için hazır.", runEyebrow: "04 / Tekrarlanabilir yürütme", cancel: "Analizi iptal et", failures: { plan: { title: "Analiz planı tamamlanamadı", detail: "Yerel hizmet eksiksiz ve doğrulanmış bir plan döndürmedi.", retry: "Plan oluşturmayı yeniden dene" }, analysis: { title: "Analiz tamamlanamadı", detail: "Yerel hizmet eksiksiz ve doğrulanmış bir sonuç döndürmedi.", retry: "Analizi yeniden dene" }, export: { title: "Word raporu tamamlanamadı", detail: "Yerel hizmet eksiksiz ve doğrulanmış bir Word raporu yazamadı.", retry: "Word dışa aktarımını yeniden dene" } }, stages: { study: "Çalışma özeti", data: "Veri ve değişkenler", plan: "Analiz planı", run: "Çalıştır ve tanıla", results: "Sonuçları incele", report: "Word raporu", power: "Güç ve örneklem" } },
 } as const;
 
-const steps: WorkflowStep[] = ["study", "data", "plan", "run", "results", "report"];
+const steps: WorkflowStep[] = ["study", "data", "plan", "run", "results", "report", "power"];
 
 const diagnosticLabels = {
   en: { separation: "separation", convergence: "convergence", estimation: "estimation", numeric: "numeric stability", analysis: "analysis", library: "statistical library" },
@@ -49,20 +50,29 @@ export function App({ api }: { api: AnalysisApi }) {
   const [reportLanguage, setReportLanguage] = useState<Language>("en");
   const [jobProgress, setJobProgress] = useState({ progress: 0, message: null as string | null });
   const [safeErrorDetail, setSafeErrorDetail] = useState<string | null>(null);
+  const [methodOverrides, setMethodOverrides] = useState<Record<string, string>>({});
   const runId = useRef(0);
   const text = labels[project.language];
 
   useEffect(() => { document.documentElement.lang = project.language; }, [project.language]);
 
-  const requestPlan = async () => {
+  const requestPlan = async (overrides?: Record<string, string>) => {
     if (!project.dataApproved) return;
+    const activeOverrides = overrides ?? methodOverrides;
     setPlanning(true); setFailedOperation(null); setSafeErrorDetail(null); project.setPlanApproved(false);
-    try { project.setPlan(await api.createPlan({ ...project.brief, language: reportLanguage })); }
+    try { project.setPlan(await api.createPlan({ ...project.brief, language: reportLanguage }, activeOverrides)); }
     catch { setFailedOperation("plan"); }
     finally { setPlanning(false); }
   };
 
+  const selectAlternative = (itemId: string, method: string) => {
+    const next = { ...methodOverrides, [itemId]: method };
+    setMethodOverrides(next);
+    void requestPlan(next);
+  };
+
   const goTo = (step: WorkflowStep) => {
+    if (step === "power") { project.setActiveStep(step); return; }
     if (step === "plan" && !project.dataApproved) return;
     if ((step === "results" || step === "report") && project.results.length === 0) return;
     project.setActiveStep(step);
@@ -115,6 +125,7 @@ export function App({ api }: { api: AnalysisApi }) {
     api.invalidateProject();
     setRunning(false); setCancelled(false); setFailedOperation(null); setSafeErrorDetail(null);
     setSavedPath(null); setJobProgress({ progress: 0, message: null });
+    setMethodOverrides({});
   };
 
   const changeBrief = (next: typeof project.brief) => {
@@ -133,12 +144,14 @@ export function App({ api }: { api: AnalysisApi }) {
     ++runId.current;
     setRunning(false); setCancelled(false); setFailedOperation(null); setSafeErrorDetail(null);
     setSavedPath(null); setJobProgress({ progress: 0, message: null });
+    setMethodOverrides({});
     project.restoreProject(restored);
     setReportLanguage(restored.brief.language ?? "en");
   };
 
   const changeDataFile = (path: string | null) => {
     setSavedPath(null); setFailedOperation(null); setSafeErrorDetail(null);
+    setMethodOverrides({});
     project.setDataFile(path);
   };
 
@@ -194,7 +207,8 @@ export function App({ api }: { api: AnalysisApi }) {
       {failedOperation ? <ErrorBanner language={project.language} operation={failedOperation} detail={safeErrorDetail} onRetry={retryFailedOperation} /> : null}
       {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} language={project.language} /> : null}
       {project.activeStep === "data" ? <DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} onFile={changeDataFile} onApproval={approveData} language={project.language} /> : null}
-      {project.activeStep === "plan" ? <PlanReview language={project.language} plan={project.plan} loading={planning} approved={project.planApproved} onApproval={(next) => void changePlanApproval(next)} onRun={() => void runAnalysis()} /> : null}
+      {project.activeStep === "plan" ? <PlanReview language={project.language} plan={project.plan} loading={planning} approved={project.planApproved} onApproval={(next) => void changePlanApproval(next)} onRun={() => void runAnalysis()} onAlternative={selectAlternative} /> : null}
+      {project.activeStep === "power" ? <PowerPlanner api={api} language={project.language} /> : null}
       {project.activeStep === "run" ? <section className="task-card run-card" aria-labelledby="run-title"><p className="eyebrow">{text.runEyebrow}</p><h1 id="run-title">{text.stages.run}</h1>{running ? <><p role="status" aria-live="polite">{jobProgress.message ?? text.running}</p><progress aria-label={text.progress} aria-valuenow={jobProgress.progress} value={jobProgress.progress} max={100}>{jobProgress.progress}%</progress><button type="button" className="secondary-action" onClick={() => void cancel()}>{text.cancel}</button></> : cancelled ? <p role="status">{text.cancelled}</p> : <p className="loading-note">{text.ready}</p>}</section> : null}
       {project.activeStep === "results" ? <ResultsReview language={project.language} results={project.results} /> : null}
       {project.activeStep === "report" ? <ReportExport language={project.language} reportLanguage={reportLanguage} exporting={exporting} canExport={completedResults} savedPath={savedPath} onReportLanguage={setReportLanguage} onExport={() => void exportReport()} /> : null}

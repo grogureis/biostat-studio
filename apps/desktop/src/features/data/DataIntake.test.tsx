@@ -21,7 +21,7 @@ it("shows only the structural observation count returned by the local profiler",
       selectDataFile: vi.fn().mockResolvedValue("/private/study.xlsx"),
       profileData: vi.fn().mockResolvedValue(profile),
       approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(),
-      cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(),
+      cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
     }}
     dataFile={null}
     approved={false}
@@ -43,7 +43,7 @@ it("invokes the explicit data approval action and presents its confirmed state",
   const onApproval = vi.fn().mockResolvedValue(undefined);
   const api = {
     selectDataFile: vi.fn().mockResolvedValue("study.xlsx"), profileData: vi.fn().mockResolvedValue(profile), approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(),
-    runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(),
+    runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
   };
   const { rerender } = render(<DataIntake
     api={api}
@@ -74,7 +74,7 @@ it("localizes structural metadata and editable role options in Turkish", async (
   render(<DataIntake
     api={{
       selectDataFile: vi.fn().mockResolvedValue("study.xlsx"), profileData: vi.fn().mockResolvedValue(profile), approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(),
-      runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(),
+      runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
     }}
     dataFile={null}
     approved={false}
@@ -97,7 +97,7 @@ it("shows a safe approval failure without exposing service details", async () =>
   render(<DataIntake
     api={{
       selectDataFile: vi.fn().mockResolvedValue("study.xlsx"), profileData: vi.fn().mockResolvedValue(profile), approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(),
-      runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(),
+      runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
     }}
     dataFile={null}
     approved={false}
