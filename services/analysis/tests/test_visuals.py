@@ -177,6 +177,74 @@ def test_paired_group_figure_uses_the_executor_complete_pairs(tmp_path: Path) ->
     assert "p2" not in english.svg_path.read_text(encoding="utf-8")
 
 
+def test_mann_whitney_and_kruskal_results_produce_group_figures(tmp_path: Path) -> None:
+    """Rank-based group methods must ship the same distribution figure contract."""
+    two_group = pd.DataFrame(
+        {
+            "score": [1.1, 2.3, 2.9, 3.6, 4.5, 5.1, 0.8, 1.4, 1.9, 2.2, 2.5],
+            "arm": ["B"] * 6 + ["A"] * 5,
+        }
+    )
+    two_group_plan = AnalysisPlan(
+        items=[_item("primary_outcome", "mann_whitney_u", ["score", "arm"])]
+    )
+    two_group_bundle = run_plan(two_group, two_group_plan)
+    mann_whitney = build_figures(
+        two_group, two_group_plan, two_group_bundle, tmp_path / "mwu", "en"
+    )[0]
+    assert mann_whitney.png_path.exists()
+    assert "n = 11" in mann_whitney.caption
+
+    multi_group = pd.DataFrame(
+        {
+            "score": [7.1, 8.4, 9.2, 6.8, 7.7, 5.9, 6.3, 7.0, 6.1, 4.2, 5.1, 4.8, 5.5, 4.9],
+            "site": ["C"] * 5 + ["B"] * 4 + ["A"] * 5,
+        }
+    )
+    multi_group_plan = AnalysisPlan(
+        items=[_item("primary_outcome", "kruskal_wallis", ["score", "site"])]
+    )
+    multi_group_bundle = run_plan(multi_group, multi_group_plan)
+    kruskal = build_figures(
+        multi_group, multi_group_plan, multi_group_bundle, tmp_path / "kw", "tr"
+    )[0]
+    assert kruskal.png_path.exists()
+    assert "n = 14" in kruskal.caption
+    svg = kruskal.svg_path.read_text(encoding="utf-8")
+    assert svg.index("<!-- C -->") < svg.index("<!-- B -->") < svg.index("<!-- A -->")
+
+
+def test_wilcoxon_result_produces_the_paired_figure(tmp_path: Path) -> None:
+    """The signed-rank alternative must keep pair lines and pair-based counts."""
+    frame = pd.DataFrame(
+        {
+            "pair_id": ["p1", "p1", "p2", "p2", "p3", "p3", "p4", "p4"],
+            "condition": pd.Categorical(
+                ["after", "before"] * 4,
+                categories=["after", "before"],
+                ordered=True,
+            ),
+            "score": [8.0, 5.0, 7.0, 6.0, 9.0, 4.0, 6.5, 6.0],
+        }
+    )
+    plan = AnalysisPlan(
+        items=[
+            _item(
+                "primary_outcome",
+                "wilcoxon_signed_rank",
+                ["score", "condition", "pair_id"],
+            )
+        ]
+    )
+    result_bundle = run_plan(frame, plan)
+
+    artifact = build_figures(frame, plan, result_bundle, tmp_path, "en")[0]
+
+    assert "n = 4 pairs (8 observations)" in artifact.caption
+    assert "n = 4 pairs (8 observations)" in artifact.alt_text
+    assert "p1" not in artifact.alt_text
+
+
 def test_same_figure_inputs_produce_byte_identical_svg_artifacts(
     tmp_path: Path,
     core_frame: pd.DataFrame,

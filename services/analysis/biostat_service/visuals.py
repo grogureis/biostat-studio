@@ -34,7 +34,17 @@ DEEP_GREEN = "#145a4a"
 TERRACOTTA = "#c96f4a"
 SLATE = "#2f3b3d"
 MIST_GREEN = "#cfe3da"
-GROUP_METHODS = frozenset({"welch_t_test", "paired_t_test", "welch_anova"})
+GROUP_METHODS = frozenset(
+    {
+        "welch_t_test",
+        "paired_t_test",
+        "welch_anova",
+        "mann_whitney_u",
+        "wilcoxon_signed_rank",
+        "kruskal_wallis",
+    }
+)
+PAIRED_METHODS = frozenset({"paired_t_test", "wilcoxon_signed_rank"})
 _SAFE_STEM = re.compile(r"[^a-z0-9_-]+")
 SVG_CREATOR = "BioStat Studio"
 SVG_HASH_SALT = "biostat-studio-figure-v1"
@@ -169,7 +179,7 @@ def _group_data(
     frame: pd.DataFrame, item: PlanItem, result: AnalysisResult
 ) -> tuple[str, str, pd.DataFrame, list[object], str | None]:
     """Reuse executor complete-case and confirmed-level semantics for one group figure."""
-    if item.method == "paired_t_test":
+    if item.method in PAIRED_METHODS:
         if len(item.required_variables) != 3:
             raise ValueError("invalid_group_figure_variables")
         outcome, exposure, pair_id = item.required_variables
