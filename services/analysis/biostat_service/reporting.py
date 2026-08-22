@@ -47,7 +47,18 @@ SAFE_SOFTWARE_COMPONENTS = frozenset(
     {"python", "numpy", "pandas", "scipy", "statsmodels"}
 )
 SAFE_TRANSFORMATIONS = frozenset({"deterministic_analysis_execution"})
-REPORT_FIGURE_METHODS = frozenset({"welch_t_test", "paired_t_test", "welch_anova"})
+REPORT_FIGURE_METHODS = frozenset(
+    {
+        "welch_t_test",
+        "paired_t_test",
+        "welch_anova",
+        "mann_whitney_u",
+        "wilcoxon_signed_rank",
+        "kruskal_wallis",
+    }
+)
+PAIRED_REPORT_METHODS = frozenset({"paired_t_test", "wilcoxon_signed_rank"})
+POSTHOC_COLUMN_WIDTHS_DXA = (4560, 1600, 1600, 1600)
 OBSERVATIONAL_DESIGNS = frozenset({"cross_sectional", "cohort", "case_control"})
 FIXED_METADATA_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
@@ -81,6 +92,17 @@ RESULT_LABELS = {
             "The first numeric estimate was {estimate} (95% CI [{lower}, {upper}]); "
             "no hypothesis-test p value or standardized effect size was applicable."
         ),
+        "narrative_no_ci": (
+            "The {analysis} included n = {n} analysis units (missing = {missing}). "
+            "The estimated {parameter} was {estimate} ({p_value}); "
+            "{effect_name} = {effect_value}. A closed-form 95% confidence interval "
+            "is not available for this rank-based effect."
+        ),
+        "posthoc_caption": (
+            "Table 2. Pairwise comparisons (Dunn test, Holm adjustment)."
+        ),
+        "posthoc_comparison": "Comparison",
+        "posthoc_adjusted_p": "Adjusted p",
         "observational_note": (
             "This observational analysis describes associations and does not establish causality."
         ),
@@ -124,6 +146,17 @@ RESULT_LABELS = {
             "İlk sayısal tahmin {estimate} idi (%95 GA [{lower}, {upper}]); "
             "hipotez testi p değeri ve standartlaştırılmış etki büyüklüğü uygulanamazdı."
         ),
+        "narrative_no_ci": (
+            "{analysis} analizi n = {n} analiz birimi içerdi (eksik = {missing}). "
+            "Tahmin edilen {parameter} {estimate} idi ({p_value}); "
+            "{effect_name} = {effect_value}. Bu sıra temelli etki için kapalı formda "
+            "%95 güven aralığı mevcut değildir."
+        ),
+        "posthoc_caption": (
+            "Tablo 2. İkili karşılaştırmalar (Dunn testi, Holm düzeltmesi)."
+        ),
+        "posthoc_comparison": "Karşılaştırma",
+        "posthoc_adjusted_p": "Düzeltilmiş p",
         "observational_note": (
             "Bu gözlemsel analiz ilişkileri betimler ve nedensellik göstermez."
         ),
@@ -227,6 +260,22 @@ WARNING_CATALOG = {
             "cannot be interpreted as a finite ratio. Action: review the contingency table "
             "and report the exact test result with this limitation."
         ),
+        "zero_differences_dropped": (
+            "Meaning: zero within-pair differences were excluded from the signed-rank "
+            "test. Impact: the analyzed pair count is smaller than the complete pair "
+            "count. Action: review the reported pair counts before interpretation."
+        ),
+        "nonparametric_ci_extreme_bounds": (
+            "Meaning: the sample was too small for the planned rank-based confidence "
+            "bounds. Impact: the reported interval uses the most extreme order "
+            "statistics and is conservative. Action: interpret the interval cautiously "
+            "and consider a larger sample."
+        ),
+        "posthoc_with_nonsignificant_omnibus": (
+            "Meaning: pairwise contrasts are reported although the omnibus test was "
+            "not significant. Impact: adjusted pairwise findings may reflect chance. "
+            "Action: interpret pairwise contrasts together with the omnibus result."
+        ),
         "library_warning": (
             "Meaning: the statistical library emitted a warning. Impact: numerical "
             "stability or model assumptions may affect the result. Action: review the "
@@ -281,6 +330,21 @@ WARNING_CATALOG = {
             "oran olarak yorumlanamaz. Eylem: kontenjans tablosunu gözden geçirin ve kesin test "
             "sonucunu bu sınırlılıkla raporlayın."
         ),
+        "zero_differences_dropped": (
+            "Anlam: sıfır çift içi farklar işaretli sıralar testinden dışlandı. Etki: "
+            "analiz edilen çift sayısı tam çift sayısından küçüktür. Eylem: yorumlamadan "
+            "önce raporlanan çift sayılarını gözden geçirin."
+        ),
+        "nonparametric_ci_extreme_bounds": (
+            "Anlam: örneklem, planlanan sıra temelli güven sınırları için çok küçüktü. "
+            "Etki: raporlanan aralık en uç sıra istatistiklerini kullanır ve tutucudur. "
+            "Eylem: aralığı ihtiyatla yorumlayın ve daha büyük bir örneklem düşünün."
+        ),
+        "posthoc_with_nonsignificant_omnibus": (
+            "Anlam: genel test anlamlı olmadığı halde ikili karşılaştırmalar raporlandı. "
+            "Etki: düzeltilmiş ikili bulgular şansı yansıtabilir. Eylem: ikili "
+            "karşılaştırmaları genel sonuçla birlikte yorumlayın."
+        ),
         "library_warning": (
             "Anlam: istatistik kütüphanesi bir uyarı verdi. Etki: sayısal kararlılık veya "
             "model varsayımları sonucu etkileyebilir. Eylem: yorumlamadan önce doğrulanmış "
@@ -302,6 +366,19 @@ METHOD_LABELS = {
         "welch_anova": ("Welch omnibus comparison", "omnibus effect"),
         "chi_square_or_fisher": ("categorical association analysis", "odds ratio"),
         "pearson_or_spearman": ("Pearson correlation analysis", "Pearson correlation"),
+        "mann_whitney_u": (
+            "Mann–Whitney U comparison",
+            "Hodges–Lehmann location shift",
+        ),
+        "wilcoxon_signed_rank": (
+            "Wilcoxon signed-rank comparison",
+            "within-pair pseudomedian difference",
+        ),
+        "kruskal_wallis": (
+            "Kruskal–Wallis omnibus comparison",
+            "rank-based omnibus effect",
+        ),
+        "spearman_rank": ("Spearman correlation analysis", "Spearman correlation"),
         "linear_regression": ("linear regression", "regression coefficient"),
         "logistic_regression": ("logistic regression", "odds ratio"),
     },
@@ -312,6 +389,19 @@ METHOD_LABELS = {
         "welch_anova": ("Welch genel karşılaştırması", "genel etki"),
         "chi_square_or_fisher": ("kategorik ilişki analizi", "olasılık oranı"),
         "pearson_or_spearman": ("Pearson korelasyon analizi", "Pearson korelasyonu"),
+        "mann_whitney_u": (
+            "Mann–Whitney U karşılaştırması",
+            "Hodges–Lehmann konum kayması",
+        ),
+        "wilcoxon_signed_rank": (
+            "Wilcoxon işaretli sıralar karşılaştırması",
+            "çift içi psödomedyan farkı",
+        ),
+        "kruskal_wallis": (
+            "Kruskal–Wallis genel karşılaştırması",
+            "sıra temelli genel etki",
+        ),
+        "spearman_rank": ("Spearman korelasyon analizi", "Spearman korelasyonu"),
         "linear_regression": ("doğrusal regresyon", "regresyon katsayısı"),
         "logistic_regression": ("lojistik regresyon", "olasılık oranı"),
     },
@@ -324,6 +414,10 @@ EFFECT_LABELS = {
         "welch_cohen_f_squared": "Welch-compatible f-squared",
         "odds_ratio": "odds ratio",
         "pearson_r": "Pearson's r",
+        "rank_biserial_r": "rank-biserial correlation",
+        "matched_rank_biserial_r": "matched-pairs rank-biserial correlation",
+        "rank_epsilon_squared": "rank-based epsilon-squared",
+        "spearman_rho": "Spearman's rho",
         "regression_coefficient": "regression coefficient",
         "standardized_descriptive_estimate": "standardized descriptive estimate",
     },
@@ -333,6 +427,10 @@ EFFECT_LABELS = {
         "welch_cohen_f_squared": "Welch uyumlu f-kare",
         "odds_ratio": "olasılık oranı",
         "pearson_r": "Pearson r",
+        "rank_biserial_r": "sıra çift-serili korelasyon",
+        "matched_rank_biserial_r": "eşleştirilmiş sıra çift-serili korelasyon",
+        "rank_epsilon_squared": "sıra temelli epsilon-kare",
+        "spearman_rho": "Spearman rho",
         "regression_coefficient": "regresyon katsayısı",
         "standardized_descriptive_estimate": "standartlaştırılmış betimsel tahmin",
     },
@@ -459,6 +557,11 @@ def _counts(result: AnalysisResult) -> tuple[int, int]:
     return result.n, missing
 
 
+def _capitalize_first(value: str) -> str:
+    """Uppercase only the first character, preserving method-name inner casing."""
+    return value[:1].upper() + value[1:]
+
+
 def _result_labels(item: PlanItem, language: Language) -> tuple[str, str]:
     try:
         return METHOD_LABELS[language][item.method]
@@ -545,11 +648,20 @@ def _add_results_narrative(
     for item in plan.items:
         result = bundle.results[item.id]
         analysis, parameter = _result_labels(item, language)
-        document.add_heading(analysis.capitalize(), level=3)
+        document.add_heading(_capitalize_first(analysis), level=3)
         values = _result_values(result, language)
         if item.method == "descriptive_summary":
             values["n"], values["missing"] = _descriptive_ranges(result)
             narrative = labels["descriptive_narrative"].format(**values)
+        elif (
+            result.confidence_interval.lower is None
+            and result.confidence_interval.upper is None
+        ):
+            narrative = labels["narrative_no_ci"].format(
+                analysis=analysis,
+                parameter=parameter,
+                **values,
+            )
         else:
             narrative = labels["narrative"].format(
                 analysis=analysis,
@@ -695,7 +807,7 @@ def _add_result_table(
         if item.method == "descriptive_summary":
             values["n"], values["missing"] = _descriptive_ranges(result)
         row_values = (
-            analysis.capitalize(),
+            _capitalize_first(analysis),
             values["n"],
             values["missing"],
             values["estimate"],
@@ -715,6 +827,94 @@ def _add_result_table(
     note.paragraph_format.keep_together = True
 
 
+def _validated_posthoc_comparisons(
+    result: AnalysisResult,
+) -> list[dict[str, str | float]] | None:
+    """Allowlist the Dunn/Holm structure before any report rendering."""
+    posthoc = result.diagnostics.get("posthoc")
+    if posthoc is None:
+        return None
+    if (
+        not isinstance(posthoc, dict)
+        or posthoc.get("method") != "dunn"
+        or posthoc.get("adjustment") != "holm"
+    ):
+        raise ValueError("invalid_posthoc_diagnostics")
+    comparisons = posthoc.get("comparisons")
+    if not isinstance(comparisons, list) or not comparisons:
+        raise ValueError("invalid_posthoc_diagnostics")
+    expected_keys = {
+        "first",
+        "second",
+        "rank_mean_difference",
+        "z",
+        "p_value",
+        "p_adjusted",
+    }
+    cleaned: list[dict[str, str | float]] = []
+    for entry in comparisons:
+        if not isinstance(entry, dict) or set(entry) != expected_keys:
+            raise ValueError("invalid_posthoc_diagnostics")
+        first, second = entry["first"], entry["second"]
+        if not isinstance(first, str) or not isinstance(second, str):
+            raise ValueError("invalid_posthoc_diagnostics")
+        numbers = {}
+        for key in ("rank_mean_difference", "z", "p_value", "p_adjusted"):
+            value = entry[key]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("invalid_posthoc_diagnostics")
+            numeric = float(value)
+            if not math.isfinite(numeric):
+                raise ValueError("invalid_posthoc_diagnostics")
+            numbers[key] = numeric
+        for key in ("p_value", "p_adjusted"):
+            if not 0.0 <= numbers[key] <= 1.0:
+                raise ValueError("invalid_posthoc_diagnostics")
+        cleaned.append({"first": first, "second": second, **numbers})
+    return cleaned
+
+
+def _add_posthoc_tables(
+    document: DocumentType,
+    plan: AnalysisPlan,
+    bundle: AnalysisBundle,
+    language: Language,
+) -> None:
+    labels = RESULT_LABELS[language]
+    for item in plan.items:
+        comparisons = _validated_posthoc_comparisons(bundle.results[item.id])
+        if comparisons is None:
+            continue
+        caption = document.add_paragraph(labels["posthoc_caption"], style="Caption")
+        caption.paragraph_format.keep_with_next = True
+        headers = (
+            labels["posthoc_comparison"],
+            "z",
+            labels["p_value"],
+            labels["posthoc_adjusted_p"],
+        )
+        table = document.add_table(rows=1, cols=len(headers))
+        table.style = "Table Grid"
+        for cell, text in zip(table.rows[0].cells, headers):
+            cell.text = text
+        for comparison in comparisons:
+            row_values = (
+                f"{comparison['first']} – {comparison['second']}",
+                _format_number(comparison["z"]) or labels["not_estimable"],
+                format_p_value(comparison["p_value"]),
+                format_p_value(comparison["p_adjusted"]),
+            )
+            for index, (cell, text) in enumerate(
+                zip(table.add_row().cells, row_values)
+            ):
+                cell.text = text
+                cell.paragraphs[0].alignment = (
+                    WD_ALIGN_PARAGRAPH.LEFT if index == 0 else WD_ALIGN_PARAGRAPH.CENTER
+                )
+        _set_table_geometry(table, POSTHOC_COLUMN_WIDTHS_DXA)
+        _mark_header_row(table.rows[0])
+
+
 def _report_figure_prose(
     item: PlanItem,
     result: AnalysisResult,
@@ -725,7 +925,7 @@ def _report_figure_prose(
     if type(result.n) is not int or result.n < 0:
         raise ValueError("invalid_report_figure_counts")
     labels = FIGURE_PROSE[language]
-    if item.method == "paired_t_test":
+    if item.method in PAIRED_REPORT_METHODS:
         raw_counts = result.diagnostics.get("counts", {})
         observations = raw_counts.get("used") if isinstance(raw_counts, dict) else None
         if type(observations) is not int or observations < 0:
@@ -927,6 +1127,7 @@ def build_results_docx(
     document.add_heading(labels["heading"], level=1)
     _add_results_narrative(document, brief, plan, bundle, language)
     _add_result_table(document, plan, bundle, language)
+    _add_posthoc_tables(document, plan, bundle, language)
     _add_figures(document, plan, bundle, figures, language)
     _add_warnings(document, plan, bundle, language)
     _add_reproducibility_appendix(document, bundle, language)

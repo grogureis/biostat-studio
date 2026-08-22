@@ -438,6 +438,140 @@ def test_p_value_formatting_uses_exact_values_unless_below_threshold(
     assert format_p_value(value) == expected
 
 
+def _build_report_pair(tmp_path: Path, frame: pd.DataFrame, plan: AnalysisPlan, brief: StudyBrief) -> tuple[str, str]:
+    bundle = run_plan(frame, plan)
+    texts = []
+    for language in ("en", "tr"):
+        figures = build_figures(
+            frame, plan, bundle, tmp_path / f"figures-{language}", language
+        )
+        destination = build_results_docx(
+            LocalProject(tmp_path / "rank.biostat"),
+            brief,
+            plan,
+            bundle,
+            figures,
+            language,
+            tmp_path / f"rank-{language}.docx",
+        )
+        texts.append(_document_text(destination))
+    return texts[0], texts[1]
+
+
+def test_mann_whitney_report_localizes_method_and_effect_labels(tmp_path: Path) -> None:
+    """The rank-based two-group report must name its method and effect in both languages."""
+    frame = pd.DataFrame(
+        {
+            "score": [1.1, 2.3, 2.9, 3.6, 4.5, 5.1, 0.8, 1.4, 1.9, 2.2, 2.5],
+            "arm": ["B"] * 6 + ["A"] * 5,
+        }
+    )
+    plan = AnalysisPlan(items=[_item("primary_outcome", "mann_whitney_u", ["score", "arm"])])
+    brief = StudyBrief(
+        title="Rank outcomes",
+        question="Is the outcome distribution different between arms?",
+        hypothesis="The arms differ.",
+        design="cohort",
+        outcome_variables=["score"],
+        exposure_variables=["arm"],
+    )
+
+    english, turkish = _build_report_pair(tmp_path, frame, plan, brief)
+
+    assert "Mann–Whitney U comparison" in english
+    assert "rank-biserial correlation" in english
+    assert "Figure 1" in english
+    assert "Mann–Whitney U karşılaştırması" in turkish
+    assert "sıra çift-serili korelasyon" in turkish
+    assert "Şekil 1" in turkish
+
+
+def test_kruskal_report_renders_the_holm_adjusted_dunn_table(tmp_path: Path) -> None:
+    """Omitting the adjusted pairwise table would leave post-hoc results unreported."""
+    frame = pd.DataFrame(
+        {
+            "score": [7.1, 8.4, 9.2, 6.8, 7.7, 5.9, 6.3, 7.0, 6.1, 4.2, 5.1, 4.8, 5.5, 4.9],
+            "site": ["C"] * 5 + ["B"] * 4 + ["A"] * 5,
+        }
+    )
+    plan = AnalysisPlan(items=[_item("primary_outcome", "kruskal_wallis", ["score", "site"])])
+    brief = StudyBrief(
+        title="Multi-site outcomes",
+        question="Is the outcome distribution different across sites?",
+        hypothesis="The sites differ.",
+        design="cohort",
+        outcome_variables=["score"],
+        exposure_variables=["site"],
+    )
+
+    english, turkish = _build_report_pair(tmp_path, frame, plan, brief)
+
+    assert "Kruskal–Wallis omnibus comparison" in english
+    assert "Table 2. Pairwise comparisons (Dunn test, Holm adjustment)." in english
+    assert "C – A" in english
+    assert "p = 0.003" in english
+    assert "closed-form 95% confidence interval is not available" in english
+    assert "Tablo 2. İkili karşılaştırmalar (Dunn testi, Holm düzeltmesi)." in turkish
+    assert "Kruskal–Wallis genel karşılaştırması" in turkish
+    assert "kapalı formda %95 güven aralığı" in turkish
+
+
+def test_wilcoxon_report_flags_dropped_zero_differences(tmp_path: Path) -> None:
+    """A silent zero-difference exclusion would misstate the analyzed evidence."""
+    frame = pd.DataFrame(
+        {
+            "pair_id": [f"p{index}" for index in range(1, 10)] * 2,
+            "condition": ["pre"] * 9 + ["post"] * 9,
+            "score": [12.0, 11.2, 14.5, 9.0, 13.0, 10.5, 12.4, 11.5, 15.0]
+            + [10.0, 11.2, 12.0, 8.5, 10.5, 10.0, 11.0, 10.0, 12.5],
+        }
+    )
+    plan = AnalysisPlan(
+        items=[_item("primary_outcome", "wilcoxon_signed_rank", ["score", "condition", "pair_id"])]
+    )
+    brief = StudyBrief(
+        title="Paired rank outcomes",
+        question="Do paired outcome measurements change with condition?",
+        hypothesis="Measurements change.",
+        design="repeated",
+        outcome_variables=["score"],
+        exposure_variables=["condition"],
+        pair_id_variable="pair_id",
+    )
+
+    english, turkish = _build_report_pair(tmp_path, frame, plan, brief)
+
+    assert "Wilcoxon signed-rank comparison" in english
+    assert "zero within-pair differences were excluded" in english
+    assert "n = 9 analysis units" in english
+    assert "Wilcoxon işaretli sıralar karşılaştırması" in turkish
+    assert "sıfır çift içi farklar" in turkish
+
+
+def test_spearman_report_names_the_rank_correlation(tmp_path: Path) -> None:
+    frame = pd.DataFrame(
+        {
+            "y": [2.1, 1.8, 3.5, 3.9, 5.2, 4.8, 6.9, 7.4],
+            "x": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        }
+    )
+    plan = AnalysisPlan(items=[_item("primary_outcome", "spearman_rank", ["y", "x"])])
+    brief = StudyBrief(
+        title="Monotonic association",
+        question="Is there a monotonic association between the measures?",
+        hypothesis="The measures are associated.",
+        design="cross_sectional",
+        outcome_variables=["y"],
+        exposure_variables=["x"],
+    )
+
+    english, turkish = _build_report_pair(tmp_path, frame, plan, brief)
+
+    assert "Spearman correlation analysis" in english
+    assert "Spearman's rho" in english
+    assert "Spearman korelasyon analizi" in turkish
+
+
 def test_paired_report_uses_pairs_as_the_analysis_denominator(tmp_path: Path) -> None:
     """Reporting paired rows instead of complete pairs would double the scientific n."""
     frame = pd.DataFrame(
