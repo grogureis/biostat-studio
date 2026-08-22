@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >> "$BIOSTAT_TEST_ALL_CALLS"
+if [[ "$*" == "run test:python" ]]; then
+  exit 7
+fi

@@ -537,6 +537,7 @@ def test_authenticated_project_plan_job_and_report_routes_keep_values_out_of_res
 def test_restart_open_reconstructs_completed_job_without_patient_rows_in_manifest(
     tmp_path: Path, monkeypatch
 ):
+    monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
     workbook_path = tmp_path / "restart.xlsx"
     workbook = Workbook()
     workbook.active.append(["group", "outcome"])

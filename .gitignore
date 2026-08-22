@@ -14,6 +14,10 @@ release/
 apps/desktop/electron-dist/
 apps/desktop/build/icon.iconset/
 apps/desktop/test-results/
+**/.pytest_cache/
+
+# Local operator and agent context
+AGENTS.md
 
 # Generated reports and local research project data
 reports/
