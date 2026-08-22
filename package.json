@@ -1,6 +1,8 @@
 {
   "name": "biostat-studio",
   "version": "0.1.0",
+  "description": "Offline-first bilingual biostatistics workflow and Word reporting application for Apple Silicon macOS.",
+  "author": "grogureis",
   "private": true,
   "workspaces": [
     "apps/*"

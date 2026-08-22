@@ -1,6 +1,8 @@
 {
   "name": "@biostat-studio/desktop",
   "version": "0.1.0",
+  "description": "BioStat Studio desktop shell for guided local biostatistical analysis and bilingual Word reporting.",
+  "author": "grogureis",
   "private": true,
   "type": "module",
   "main": "electron-dist/main.js",
