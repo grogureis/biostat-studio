@@ -352,6 +352,75 @@ def test_same_completed_job_builds_language_specific_figures_for_en_and_tr_expor
     assert exported[1][1:] == ("caption-tr", "axis-tr", "tr")
 
 
+def test_plan_method_override_runs_the_documented_alternative_end_to_end(
+    client, tmp_path: Path
+) -> None:
+    workbook_path = tmp_path / "override.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    for index in range(12):
+        workbook.active.append(["control" if index < 6 else "treated", float(index + 1)])
+    workbook.save(workbook_path)
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {
+        "title": "Override",
+        "question": "Is the outcome different between groups?",
+        "hypothesis": "Groups differ.",
+        "design": "cohort",
+        "outcome_variables": ["outcome"],
+        "exposure_variables": ["group"],
+    }
+    root = tmp_path / "override.biostat"
+    created = client.post(
+        "/v1/projects", headers=headers,
+        json={"source_path": str(workbook_path), "project_root": str(root), "brief": brief},
+    ).json()
+    project_id = created["id"]
+    client.post(f"/v1/projects/{project_id}/data-approval", headers=headers, json={"roles": _approved_roles(created)})
+
+    rejected = client.post(
+        "/v1/plans", headers=headers,
+        json={"project_id": project_id, "method_overrides": {"primary_outcome": "logistic_regression"}},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["blocking_errors"] == ["invalid_method_override:primary_outcome"]
+
+    plan = client.post(
+        "/v1/plans", headers=headers,
+        json={"project_id": project_id, "method_overrides": {"primary_outcome": "mann_whitney_u"}},
+    ).json()
+    assert plan["blocking_errors"] == []
+    assert [item["method"] for item in plan["items"]] == [
+        "descriptive_summary",
+        "mann_whitney_u",
+    ]
+    assert plan["items"][-1]["robust_alternative"] == "welch_t_test"
+
+    client.post(
+        "/v1/plans/approval", headers=headers,
+        json={"project_id": project_id, "revision": plan["revision"], "digest": plan["digest"]},
+    )
+    job = client.post(
+        "/v1/jobs", headers=headers,
+        json={"project_id": project_id, "approved_plan_revision": plan["revision"], "approved_plan_digest": plan["digest"]},
+    ).json()
+    final = client.app.state.job_manager.wait(UUID(job["id"]), timeout=5)
+
+    assert final.status == "completed"
+    result = next(
+        entry for entry in final.result["results"] if entry["id"] == "primary_outcome"
+    )
+    assert result["method"] == "mann_whitney_u"
+    assert result["effect_size"]["name"] == "rank_biserial_r"
+    audit_events = [
+        json.loads(line)
+        for line in (root / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    generated = [event for event in audit_events if event["type"] == "plan_generated"]
+    assert generated[-1]["actor"] == "user"
+    assert generated[-1]["method_ids"] == ["descriptive_summary", "mann_whitney_u"]
+
+
 def test_failed_analysis_persists_only_safe_diagnostics_and_terminal_audit(
     client, tmp_path: Path, monkeypatch
 ) -> None:

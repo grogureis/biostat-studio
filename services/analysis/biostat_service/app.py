@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 import shutil
 from threading import Lock
-from typing import Any, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from uuid import UUID, uuid4
 
 import pandas as pd
@@ -67,8 +67,15 @@ class OpenProjectRequest(BaseModel):
     project_root: str = Field(min_length=1)
 
 
+SAFE_METHOD_IDENTIFIER = r"^[a-z0-9_]{1,64}$"
+
+
 class PlanRequest(BaseModel):
     project_id: UUID
+    method_overrides: dict[
+        Annotated[str, Field(pattern=SAFE_METHOD_IDENTIFIER)],
+        Annotated[str, Field(pattern=SAFE_METHOD_IDENTIFIER)],
+    ] = Field(default_factory=dict)
 
 
 class DataApprovalRequest(BaseModel):
@@ -558,20 +565,26 @@ def create_app() -> FastAPI:
                 raise HTTPException(
                     status_code=409, detail="data_structure_approval_required"
                 )
-            plan = build_plan(context.brief, context.profile, context.approved_roles)
+            plan = build_plan(
+                context.brief,
+                context.profile,
+                context.approved_roles,
+                request.method_overrides or None,
+            )
             context.plan = plan
             context.plan_revision = uuid4()
             context.plan_digest = _plan_digest(plan)
             context.approved_plan_revision = None
             context.approved_plan_digest = None
-            append_audit_event(
-                context.project,
-                {
-                    "type": "plan_generated",
-                    "actor": "system",
-                    "plan_version": plan.version,
-                },
-            )
+            plan_event: dict[str, Any] = {
+                "type": "plan_generated",
+                "actor": "user" if request.method_overrides else "system",
+                "plan_version": plan.version,
+            }
+            planned_methods = list(dict.fromkeys(item.method for item in plan.items))
+            if planned_methods:
+                plan_event["method_ids"] = planned_methods
+            append_audit_event(context.project, plan_event)
             _persist_context(context)
             return {
                 **plan.model_dump(mode="json"),
