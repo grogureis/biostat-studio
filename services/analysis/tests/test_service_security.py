@@ -614,6 +614,154 @@ def test_restart_open_reconstructs_completed_job_without_patient_rows_in_manifes
         assert exported[0][2] == "en"
 
 
+def test_new_project_executes_from_immutable_snapshot_after_original_is_removed(
+    client, tmp_path: Path
+) -> None:
+    workbook_path = tmp_path / "external.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    for index in range(12):
+        workbook.active.append(["control" if index < 6 else "treated", index + 1])
+    workbook.save(workbook_path)
+    root = tmp_path / "snapshot.biostat"
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {
+        "title": "Immutable snapshot",
+        "question": "Is the outcome different between groups?",
+        "hypothesis": "The groups have different outcomes.",
+        "design": "cohort",
+        "outcome_variables": ["outcome"],
+        "exposure_variables": ["group"],
+    }
+
+    created = client.post(
+        "/v1/projects",
+        headers=headers,
+        json={
+            "source_path": str(workbook_path),
+            "project_root": str(root),
+            "brief": brief,
+        },
+    ).json()
+    project_id = created["id"]
+    workbook_path.unlink()
+
+    assert client.post(
+        f"/v1/projects/{project_id}/data-approval",
+        headers=headers,
+        json={"roles": _approved_roles(created)},
+    ).status_code == 200
+    plan = client.post(
+        "/v1/plans", headers=headers, json={"project_id": project_id}
+    ).json()
+    assert client.post(
+        "/v1/plans/approval",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "revision": plan["revision"],
+            "digest": plan["digest"],
+        },
+    ).status_code == 200
+    queued = client.post(
+        "/v1/jobs",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "approved_plan_revision": plan["revision"],
+            "approved_plan_digest": plan["digest"],
+        },
+    ).json()
+    terminal = client.app.state.job_manager.wait(UUID(queued["id"]), timeout=5)
+
+    assert terminal.status == "completed"
+    context = client.app.state.projects[UUID(project_id)]
+    assert context.profile.source_path == root / "source" / "source.xlsx"
+
+
+@pytest.mark.parametrize(
+    "tamper_case", ["plan_content", "job_digest", "bundle_provenance"]
+)
+def test_project_open_rejects_tampered_persisted_analysis_state(
+    client, tmp_path: Path, tamper_case: str
+) -> None:
+    workbook_path = tmp_path / f"{tamper_case}.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["group", "outcome"])
+    for index in range(12):
+        workbook.active.append(["control" if index < 6 else "treated", index + 1])
+    workbook.save(workbook_path)
+    root = tmp_path / f"{tamper_case}.biostat"
+    headers = {"Authorization": "Bearer test-token"}
+    brief = {
+        "title": "Tamper boundary",
+        "question": "Is the outcome different between groups?",
+        "hypothesis": "The groups have different outcomes.",
+        "design": "cohort",
+        "outcome_variables": ["outcome"],
+        "exposure_variables": ["group"],
+    }
+    created = client.post(
+        "/v1/projects",
+        headers=headers,
+        json={
+            "source_path": str(workbook_path),
+            "project_root": str(root),
+            "brief": brief,
+        },
+    ).json()
+    project_id = created["id"]
+    assert client.post(
+        f"/v1/projects/{project_id}/data-approval",
+        headers=headers,
+        json={"roles": _approved_roles(created)},
+    ).status_code == 200
+    plan = client.post(
+        "/v1/plans", headers=headers, json={"project_id": project_id}
+    ).json()
+    assert client.post(
+        "/v1/plans/approval",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "revision": plan["revision"],
+            "digest": plan["digest"],
+        },
+    ).status_code == 200
+    queued = client.post(
+        "/v1/jobs",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "approved_plan_revision": plan["revision"],
+            "approved_plan_digest": plan["digest"],
+        },
+    ).json()
+    terminal = client.app.state.job_manager.wait(UUID(queued["id"]), timeout=5)
+    assert terminal.status == "completed"
+
+    manifest_path = root / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stored_job = manifest["state"]["terminal_jobs"][queued["id"]]["output"]
+    if tamper_case == "plan_content":
+        manifest["state"]["plan"]["content"]["version"] = 999
+    elif tamper_case == "job_digest":
+        stored_job["digest"] = "0" * 64
+    else:
+        stored_job["bundle"]["provenance"]["data_fingerprint"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with TestClient(create_app()) as restarted:
+        opened = restarted.post(
+            "/v1/projects/open",
+            headers=headers,
+            json={"project_root": str(root)},
+        )
+
+    assert opened.status_code == 422
+    assert opened.json() == {"detail": "project_open_failed"}
+
+
 def test_v1_rejects_non_loopback_client(monkeypatch):
     monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
     with TestClient(create_app(), client=("192.0.2.1", 5000)) as remote_client:

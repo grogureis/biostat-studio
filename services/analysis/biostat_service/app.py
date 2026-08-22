@@ -209,6 +209,8 @@ def _restore_context(project: LocalProject, manifest: dict[str, Any]) -> Project
         context.plan = AnalysisPlan.model_validate(plan_value["content"])
         context.plan_revision = UUID(plan_value["revision"])
         context.plan_digest = str(plan_value["digest"])
+        if context.plan_digest != _plan_digest(context.plan):
+            raise ValueError("plan_digest_mismatch")
         if plan_value.get("approved") is True:
             context.approved_plan_revision = context.plan_revision
             context.approved_plan_digest = context.plan_digest
@@ -235,6 +237,7 @@ def _restore_context(project: LocalProject, manifest: dict[str, Any]) -> Project
             revision=UUID(output_value["revision"]),
             digest=str(output_value["digest"]),
         )
+        _validate_restored_output(output, terminal.get("result"))
         context.job_ids.add(job_id)
         context.job_outputs[job_id] = output
         context.bundle = output.bundle
@@ -283,6 +286,32 @@ def _plan_digest(plan: AnalysisPlan) -> str:
         plan.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return sha256(canonical).hexdigest()
+
+
+def _validate_restored_output(output: JobOutput, stored_result: Any) -> None:
+    """Reject corrupted durable output before it can become reportable."""
+    if output.digest != _plan_digest(output.plan):
+        raise ValueError("job_plan_digest_mismatch")
+    provenance = output.bundle.provenance
+    fingerprint = provenance.data_fingerprint
+    if (
+        len(fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in fingerprint)
+        or provenance.plan_version != output.plan.version
+    ):
+        raise ValueError("job_provenance_mismatch")
+    planned_methods = {item.method for item in output.plan.items}
+    for result in output.bundle.results.values():
+        result_provenance = result.provenance
+        if (
+            result_provenance.data_fingerprint != provenance.data_fingerprint
+            or result_provenance.plan_version != provenance.plan_version
+            or result_provenance.library_versions != provenance.library_versions
+            or result.method not in planned_methods
+        ):
+            raise ValueError("job_provenance_mismatch")
+    if stored_result != _job_result_payload(output.bundle):
+        raise ValueError("job_result_mismatch")
 
 
 def _validated_roles(
@@ -442,6 +471,7 @@ def create_app() -> FastAPI:
             project = create_project(root, request.brief, profile)
             append_audit_event(project, {"type": "data_imported", "actor": "user"})
             _, manifest = load_project(project.root)
+            profile = profile_from_manifest(project, manifest)
         except (OSError, ValueError, RuntimeError):
             raise HTTPException(status_code=422, detail="project_creation_failed")
         project_id = UUID(manifest["project_id"])

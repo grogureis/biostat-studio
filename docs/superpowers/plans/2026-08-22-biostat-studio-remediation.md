@@ -54,13 +54,13 @@
 - Consumes: `profile_from_manifest(project, manifest)`, `_plan_digest(plan)`, `AnalysisBundle.provenance.data_fingerprint`.
 - Produces: fail-closed `_restore_context()` and a new project context whose `profile.source_path` is `<project>/source/source.xlsx`.
 
-- [ ] Add an integration test that creates a project, moves/changes the original workbook, and still completes analysis/report generation from the immutable snapshot.
-- [ ] Run the test to observe RED at `_read_frame()` because the context still points to the external workbook.
-- [ ] Build the new context from `profile_from_manifest(project, manifest)` immediately after `create_project()`.
-- [ ] Add tampering tests that alter the stored plan digest, approval binding, completed-job digest, and bundle data fingerprint; each `/v1/projects/open` request must return `422 project_open_failed`.
-- [ ] Run the tampering tests to observe RED because `_restore_context()` currently trusts stored values.
-- [ ] Recompute every plan digest on restore, require approval revision/digest equality, require each completed job digest to match its embedded plan, and require bundle provenance fingerprint to match the snapshot.
-- [ ] Run all project/service-security persistence tests.
+- [x] Add an integration test that creates a project, moves/changes the original workbook, and still completes analysis/report generation from the immutable snapshot.
+- [x] Run the test to observe RED at `_read_frame()` because the context still points to the external workbook.
+- [x] Build the new context from `profile_from_manifest(project, manifest)` immediately after `create_project()`.
+- [x] Add tampering tests that alter the stored plan digest, approval binding, completed-job digest, and bundle data fingerprint; each `/v1/projects/open` request must return `422 project_open_failed`.
+- [x] Run the tampering tests to observe RED because `_restore_context()` currently trusts stored values.
+- [x] Recompute every plan digest on restore, require approval revision/digest equality, require each completed job digest to match its embedded plan, and require bundle provenance to remain internally bound to the persisted result.
+- [x] Run all project/service-security persistence tests.
 
 ### Task 3: Make approved variable kinds operational
 
