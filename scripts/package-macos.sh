@@ -15,7 +15,9 @@ fi
 PYINSTALLER_CONFIG_DIR=/private/tmp/biostat-task12-pyinstaller MPLCONFIGDIR=/private/tmp/biostat-task12-mpl "$PYTHON" -m PyInstaller services/analysis/biostat-service.spec --noconfirm --clean --distpath services/analysis/dist --workpath services/analysis/build
 npm run build --workspace apps/desktop
 npx tsc --project apps/desktop/tsconfig.electron.json
+bash scripts/build-preload.sh
 printf '{"type":"module"}\n' > apps/desktop/electron-dist/package.json
+bash scripts/smoke-preload-bridge.sh
 npx electron-builder --config electron-builder.yml --mac dmg dir --arm64
 bash scripts/smoke-packaged-app.sh
 bash scripts/verify-package-cleanliness.sh

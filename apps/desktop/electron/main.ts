@@ -29,7 +29,7 @@ function createWindow(): BrowserWindow {
     minWidth: 1024,
     minHeight: 720,
     webPreferences: {
-      preload: join(currentDirectory, "preload.js"),
+      preload: join(currentDirectory, "preload.cjs"),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,

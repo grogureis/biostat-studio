@@ -28,6 +28,7 @@
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.2",
     "electron": "^37.2.6",
+    "esbuild": "^0.28.2",
     "electron-builder": "^26.0.12",
     "jsdom": "^29.1.1",
     "playwright": "^1.55.0",

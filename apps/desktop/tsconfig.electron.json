@@ -13,5 +13,8 @@
     "sourceMap": false
   },
   "include": ["electron/**/*.ts"],
-  "exclude": ["electron/**/*.test.ts"]
+  // preload.ts is bundled separately into CommonJS (electron-dist/preload.cjs):
+  // Electron loads a sandboxed preload as CJS and cannot resolve relative
+  // requires, so the ESM output tsc would emit here is unloadable.
+  "exclude": ["electron/**/*.test.ts", "electron/preload.ts"]
 }

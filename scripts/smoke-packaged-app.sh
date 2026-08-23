@@ -15,6 +15,13 @@ test -x "$SIDECAR"
 test -f "$ASAR"
 test -x "$ASAR_TOOL"
 "$ASAR_TOOL" extract "$ASAR" "$RENDERER_ROOT"
+# The sandboxed preload must ship as self-contained CommonJS; an ESM preload
+# fails to load and silently strips window.biostat from the renderer.
+test -f "$RENDERER_ROOT/electron-dist/preload.cjs"
+test ! -e "$RENDERER_ROOT/electron-dist/preload.js"
+grep -q 'preload\.cjs' "$RENDERER_ROOT/electron-dist/main.js"
+! grep -qE '^\s*(import|export) ' "$RENDERER_ROOT/electron-dist/preload.cjs"
+BIOSTAT_PRELOAD="$RENDERER_ROOT/electron-dist/preload.cjs" bash "$ROOT/scripts/smoke-preload-bridge.sh"
 "$NODE" --input-type=module -e '
   import { existsSync, readFileSync } from "node:fs";
   import { fileURLToPath, pathToFileURL } from "node:url";
