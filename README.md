@@ -42,21 +42,14 @@ Rank-based methods are never selected silently: the plan documents them as alter
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    U["Researcher"] --> R["Clinical Calm React interface"]
-    R --> P["Typed preload bridge"]
-    P --> E["Electron main process"]
-    E -->|"Authenticated loopback API<br/>ephemeral port"| S["Bundled Python 3.12 service"]
-    S --> D["Excel intake and immutable project snapshot"]
-    S --> A["Deterministic planner and statistical engine"]
-    S --> V["Publication-quality figures"]
-    S --> W["Bilingual Word report generator"]
-    D --> L["Local .biostat project"]
-    A --> L
-    V --> L
-    W --> L
-```
+<p align="center">
+  <img src="docs/assets/architecture.svg" width="920"
+       alt="BioStat Studio architecture: the Electron shell reaches an authenticated loopback Python service through a typed preload bridge; data_intake, planner and analyses produce a single typed result contract; visuals and reporting derive the bilingual Word report from that contract.">
+</p>
+
+The dotted line marks the read-only source and the persistence/audit trail; the dashed terracotta line is the only hop that crosses the authenticated loopback boundary. `power` hangs off the service directly because it never touches an imported dataset.
+
+> **Interactive map:** [`docs/architecture/index.html`](docs/architecture/index.html) — draggable nodes, per-module inspector, and an end-to-end flow you can replay. Open the file in a browser.
 
 ### Desktop boundary
 
@@ -112,6 +105,8 @@ scripts/                      Reproducible environment, packaging, and smoke che
 tests/fixtures/               Synthetic reference workbook
 docs/superpowers/specs/       Approved product and architecture specification
 docs/superpowers/plans/       Implementation and remediation plans
+docs/architecture/            Interactive architecture map (open index.html)
+docs/assets/                  Architecture diagrams used by the READMEs
 ```
 
 ## Development
