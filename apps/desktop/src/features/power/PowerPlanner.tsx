@@ -140,9 +140,6 @@ export function PowerPlanner({ api, language }: PowerPlannerProps) {
     }
   };
 
-  const unitLabel = (unit: PowerResponse["sample_size_unit"]): string =>
-    unit === "per_group" ? text.perGroup : unit === "pairs" ? text.pairs : text.total;
-
   return (
     <section className="task-card" aria-labelledby="power-title">
       <header className="task-heading">
@@ -227,11 +224,9 @@ export function PowerPlanner({ api, language }: PowerPlannerProps) {
             <>
               <h2>{text.resultSample}</h2>
               <p>
-                {result.total_rounded !== null
-                && result.per_group_rounded !== null
-                && result.total_rounded !== result.per_group_rounded
-                  ? `n = ${result.per_group_rounded} ${text.perGroup} (${text.total}: ${result.total_rounded})`
-                  : `n = ${result.per_group_rounded ?? "—"} ${unitLabel(result.sample_size_unit)}`}
+                {result.sample_size_unit === "pairs"
+                  ? `n = ${result.per_group_rounded ?? "—"} ${text.pairs}`
+                  : `n = ${result.per_group_rounded ?? "—"} ${text.perGroup} (${text.total}: ${result.total_rounded ?? "—"})`}
               </p>
               <p className="microcopy">{`${text.achievedNote}: ${formatPercent(result.achieved_power)}`}</p>
             </>

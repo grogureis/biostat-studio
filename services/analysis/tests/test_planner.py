@@ -733,6 +733,8 @@ def test_kruskal_override_carries_the_holm_multiplicity_contract() -> None:
     assert primary.multiplicity_strategy == "dunn_pairwise_holm_adjusted"
     assert "effect_size:rank_epsilon_squared" in primary.outputs
     assert "table:multi_group_comparison_with_posthoc" in primary.outputs
+    assert "confidence_interval:not_available_rank_epsilon_squared" in primary.outputs
+    assert "confidence_interval:95_percent" not in primary.outputs
 
 
 def test_pearson_choice_documents_spearman_alternative_and_override() -> None:

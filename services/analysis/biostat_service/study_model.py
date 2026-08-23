@@ -27,6 +27,22 @@ VERTICAL_SLICE_METHOD_IDS = frozenset(
 )
 
 
+# Group-comparison methods that produce the shared distribution figure, and the
+# subset whose data are linked pairs.  visuals.py and reporting.py both consume
+# these so figure generation and report expectations cannot drift apart.
+GROUP_FIGURE_METHOD_IDS = frozenset(
+    {
+        "welch_t_test",
+        "paired_t_test",
+        "welch_anova",
+        "mann_whitney_u",
+        "wilcoxon_signed_rank",
+        "kruskal_wallis",
+    }
+)
+PAIRED_METHOD_IDS = frozenset({"paired_t_test", "wilcoxon_signed_rank"})
+
+
 class BlockingPlanError(ValueError):
     """A stable planning failure caused by incomplete or unsupported structure."""
 

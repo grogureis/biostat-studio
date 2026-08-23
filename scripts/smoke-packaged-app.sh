@@ -21,9 +21,12 @@ test -x "$ASAR_TOOL"
 
   const indexPath = process.argv[1];
   const html = readFileSync(indexPath, "utf8");
-  const references = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(
-    (match) => match[1],
-  );
+  // Only script and stylesheet references must resolve inside the package;
+  // anchors, data: URIs, and external hrefs are not packaging failures.
+  const references = [
+    ...html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g),
+    ...html.matchAll(/<link[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"/g),
+  ].map((match) => match[1]);
   if (references.length === 0) {
     throw new Error("packaged_renderer_has_no_assets");
   }

@@ -10,11 +10,14 @@ from __future__ import annotations
 import math
 import platform
 from typing import Literal, Optional
+import warnings as python_warnings
 
+import numpy as np
 from pydantic import BaseModel, Field
 import scipy
 from scipy import stats
 import statsmodels
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.stats.power import (
     FTestAnovaPower,
     NormalIndPower,
@@ -38,6 +41,16 @@ EFFECT_SIZE_NAMES: dict[str, str] = {
     "one_way_anova": "cohen_f",
     "two_proportions": "cohen_h",
     "correlation": "pearson_r",
+}
+# The convention behind each computation, surfaced verbatim in the API response
+# so the user can tell e.g. the arcsine two-proportion method apart from a
+# pooled-z construction (they diverge for rare outcomes).
+METHOD_NAMES: dict[str, str] = {
+    "two_sample_t": "statsmodels_t_solver",
+    "paired_t": "statsmodels_t_solver",
+    "one_way_anova": "statsmodels_noncentral_f_solver",
+    "two_proportions": "statsmodels_normal_solver_arcsine_transform",
+    "correlation": "closed_form_fisher_z",
 }
 SAMPLE_SIZE_UNITS: dict[str, str] = {
     "two_sample_t": "per_group",
@@ -81,14 +94,10 @@ class PowerResult(BaseModel):
 def _validate_common(request: PowerRequest) -> None:
     if not 0.0 < request.alpha < 1.0:
         raise PowerValidationError("invalid_alpha")
-    if request.solve_for == "sample_size":
-        if request.power is None:
-            raise PowerValidationError("missing_power_target")
-        if not 0.0 < request.power < 1.0:
-            raise PowerValidationError("invalid_power")
-    else:
-        if request.sample_size is None:
-            raise PowerValidationError("missing_sample_size")
+    if request.solve_for == "sample_size" and request.power is None:
+        raise PowerValidationError("missing_power_target")
+    if request.solve_for == "power" and request.sample_size is None:
+        raise PowerValidationError("missing_sample_size")
     if request.power is not None and not 0.0 < request.power < 1.0:
         raise PowerValidationError("invalid_power")
 
@@ -124,6 +133,11 @@ def _minimum_sample_size(analysis: str) -> int:
     return 4 if analysis == "correlation" else 2
 
 
+def _scalar(value: object) -> float:
+    """Convert a statsmodels scalar-or-size-1-array result without deprecation."""
+    return float(np.asarray(value, dtype=float).reshape(()))
+
+
 def _correlation_power(effect: float, n: float, alpha: float) -> float:
     critical = float(stats.norm.ppf(1 - alpha / 2))
     return float(
@@ -135,67 +149,71 @@ def _solver_power(
     analysis: str, effect: float, n: float, alpha: float, groups: int
 ) -> float:
     if analysis == "two_sample_t":
-        return float(
+        return _scalar(
             TTestIndPower().power(
                 effect_size=effect, nobs1=n, alpha=alpha, ratio=1.0,
                 alternative="two-sided",
             )
         )
     if analysis == "paired_t":
-        return float(
+        return _scalar(
             TTestPower().power(
                 effect_size=effect, nobs=n, alpha=alpha, alternative="two-sided"
             )
         )
     if analysis == "one_way_anova":
-        return float(
+        return _scalar(
             FTestAnovaPower().power(
                 effect_size=effect, nobs=n, alpha=alpha, k_groups=groups
             )
         )
     if analysis == "two_proportions":
-        return float(
+        return _scalar(
             NormalIndPower().power(
                 effect_size=effect, nobs1=n, alpha=alpha, ratio=1.0,
                 alternative="two-sided",
             )
         )
-    return _correlation_power(effect, n, alpha)
+    if analysis == "correlation":
+        return _correlation_power(effect, n, alpha)
+    raise PowerValidationError("unknown_power_analysis")
 
 
 def _solve_sample_size(
     analysis: str, effect: float, power: float, alpha: float, groups: int
 ) -> float:
     if analysis == "two_sample_t":
-        return float(
+        return _scalar(
             TTestIndPower().solve_power(
                 effect_size=effect, alpha=alpha, power=power, ratio=1.0,
                 alternative="two-sided",
             )
         )
     if analysis == "paired_t":
-        return float(
+        return _scalar(
             TTestPower().solve_power(
                 effect_size=effect, alpha=alpha, power=power,
                 alternative="two-sided",
             )
         )
     if analysis == "one_way_anova":
-        return float(
+        return _scalar(
             FTestAnovaPower().solve_power(
                 effect_size=effect, alpha=alpha, power=power, k_groups=groups
             )
         )
     if analysis == "two_proportions":
-        return float(
+        return _scalar(
             NormalIndPower().solve_power(
                 effect_size=effect, alpha=alpha, power=power, ratio=1.0,
                 alternative="two-sided",
             )
         )
-    critical = float(stats.norm.ppf(1 - alpha / 2))
-    beta_quantile = float(stats.norm.ppf(power))
-    return ((critical + beta_quantile) / abs(math.atanh(effect))) ** 2 + 3
+    if analysis == "correlation":
+        critical = float(stats.norm.ppf(1 - alpha / 2))
+        beta_quantile = float(stats.norm.ppf(power))
+        return ((critical + beta_quantile) / abs(math.atanh(effect))) ** 2 + 3
+    raise PowerValidationError("unknown_power_analysis")
 
 
 def _rounded_allocation(analysis: str, raw: float, groups: int) -> tuple[int, int]:
@@ -233,11 +251,7 @@ def compute_power(request: PowerRequest) -> PowerResult:
         inputs["proportion_two"] = float(request.proportion_two)
     if request.analysis == "one_way_anova":
         inputs["groups"] = groups
-    method = (
-        "closed_form_fisher_z"
-        if request.analysis == "correlation"
-        else "statsmodels_power_solver"
-    )
+    method = METHOD_NAMES[request.analysis]
     effect_name = EFFECT_SIZE_NAMES[request.analysis]
     unit = SAMPLE_SIZE_UNITS[request.analysis]
 
@@ -263,9 +277,15 @@ def compute_power(request: PowerRequest) -> PowerResult:
         )
 
     inputs["target_power"] = float(request.power)
-    raw = _solve_sample_size(
-        request.analysis, effect, float(request.power), request.alpha, groups
-    )
+    with python_warnings.catch_warnings(record=True) as caught:
+        python_warnings.simplefilter("always")
+        raw = _solve_sample_size(
+            request.analysis, effect, float(request.power), request.alpha, groups
+        )
+    if any(issubclass(warning.category, ConvergenceWarning) for warning in caught):
+        # statsmodels returns its solver start value on non-convergence; treating
+        # that as a valid clinical sample size would be silently wrong.
+        raise PowerValidationError("sample_size_solution_failed")
     if not math.isfinite(raw) or raw <= 0.0:
         raise PowerValidationError("sample_size_solution_failed")
     per_group, total = _rounded_allocation(request.analysis, raw, groups)

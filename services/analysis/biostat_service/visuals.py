@@ -24,6 +24,7 @@ from biostat_service.analyses import (
     _sort_key,
 )
 from biostat_service.contracts import AnalysisPlan, AnalysisResult, PlanItem
+from biostat_service.study_model import GROUP_FIGURE_METHOD_IDS, PAIRED_METHOD_IDS
 
 
 DPI = 300
@@ -34,17 +35,8 @@ DEEP_GREEN = "#145a4a"
 TERRACOTTA = "#c96f4a"
 SLATE = "#2f3b3d"
 MIST_GREEN = "#cfe3da"
-GROUP_METHODS = frozenset(
-    {
-        "welch_t_test",
-        "paired_t_test",
-        "welch_anova",
-        "mann_whitney_u",
-        "wilcoxon_signed_rank",
-        "kruskal_wallis",
-    }
-)
-PAIRED_METHODS = frozenset({"paired_t_test", "wilcoxon_signed_rank"})
+GROUP_METHODS = GROUP_FIGURE_METHOD_IDS
+PAIRED_METHODS = PAIRED_METHOD_IDS
 _SAFE_STEM = re.compile(r"[^a-z0-9_-]+")
 SVG_CREATOR = "BioStat Studio"
 SVG_HASH_SALT = "biostat-studio-figure-v1"

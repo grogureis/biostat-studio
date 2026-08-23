@@ -157,6 +157,9 @@ export function App({ api }: { api: AnalysisApi }) {
 
   const approveData = async (roles: import("./api/types").VariableRole[]) => {
     await api.approveDataStructure({ ...project.brief, language: reportLanguage }, roles);
+    // A fresh role snapshot can change the planned method; a stale override
+    // would then permanently block plan generation.
+    setMethodOverrides({});
     project.approveDataStructure();
   };
 

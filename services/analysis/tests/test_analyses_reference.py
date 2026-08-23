@@ -296,6 +296,18 @@ def test_mann_whitney_matches_independent_reference() -> None:
     assert result.diagnostics["confidence_interval_method"] == (
         "hodges_lehmann_order_statistic_normal_approximation"
     )
+    assert result.diagnostics["confidence_interval_bound_rank_rule"] == "floor_conservative"
+
+
+def test_pairwise_interval_size_limit_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Huge groups must fail with a stable code instead of exhausting memory."""
+    monkeypatch.setattr(analysis_module, "MAX_PAIRWISE_VALUES", 10)
+    plan = AnalysisPlan(items=[item("primary_outcome", "mann_whitney_u", ["score", "arm"])])
+
+    with pytest.raises(
+        AnalysisExecutionError, match="nonparametric_interval_size_limit_exceeded"
+    ):
+        run_plan(mann_whitney_frame(), plan)
 
 
 def test_mann_whitney_uses_asymptotic_method_when_values_tie() -> None:
@@ -347,8 +359,9 @@ def test_wilcoxon_signed_rank_matches_independent_reference() -> None:
     assert result.n == 9
     assert result.estimate == pytest.approx(1.5)
     assert result.p_value == pytest.approx(0.01953125)
+    # Bound rank floored (conservative): K = floor(5.956) = 5 over 45 Walsh averages.
     assert result.confidence_interval.lower == pytest.approx(0.4)
-    assert result.confidence_interval.upper == pytest.approx(2.4)
+    assert result.confidence_interval.upper == pytest.approx(2.5)
     assert result.effect_size.name == "matched_rank_biserial_r"
     assert result.effect_size.value == pytest.approx(0.8666666666666667)
     assert result.diagnostics["pairs"] == 9

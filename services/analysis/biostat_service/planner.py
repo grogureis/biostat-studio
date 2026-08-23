@@ -258,6 +258,7 @@ def _method_contract(
                 "Interpret Holm-adjusted pairwise contrasts together with the omnibus result.",
             ],
             "effect": "rank_epsilon_squared",
+            "interval": "confidence_interval:not_available_rank_epsilon_squared",
             "table": "multi_group_comparison_with_posthoc",
             "figure": "group_distribution_and_effect",
             "multiplicity": "dunn_pairwise_holm_adjusted",
@@ -367,7 +368,7 @@ def _inferential_item(
         ),
         outputs=[
             f"effect_size:{contract['effect']}",
-            "confidence_interval:95_percent",
+            str(contract.get("interval", "confidence_interval:95_percent")),
             f"table:{contract['table']}",
             f"figure:{contract['figure']}",
         ],
@@ -439,24 +440,24 @@ def _apply_method_overrides(
 ) -> list[str]:
     """Swap plan items to their documented alternatives; report violations."""
     errors: list[str] = []
-    by_id = {planned.id: planned for planned in items}
+    position_by_id = {planned.id: position for position, planned in enumerate(items)}
     for item_id, requested in method_overrides.items():
-        target = by_id.get(item_id)
-        if target is None:
+        position = position_by_id.get(item_id)
+        if position is None:
             errors.append(f"unknown_override_item:{item_id}")
             continue
+        target = items[position]
         if requested == target.method:
             continue
         if target.robust_alternative is None or requested != target.robust_alternative:
             errors.append(f"invalid_method_override:{item_id}")
             continue
-        replacement = _inferential_item(
+        items[position] = _inferential_item(
             PlanChoice(requested, target.method),
             list(target.required_variables),
             warnings,
             adjusted=adjusted,
         )
-        items[items.index(target)] = replacement
     return errors
 
 

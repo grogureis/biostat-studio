@@ -41,6 +41,10 @@ ALPHA = 1.0 - CONFIDENCE_LEVEL
 # Methods that may appear as documented alternatives without a verified executor.
 # Every previously listed rank-based alternative now has a verified executor.
 ALTERNATIVE_METADATA_ONLY: frozenset[str] = frozenset()
+NORMAL_CRITICAL = float(stats.norm.ppf(1 - ALPHA / 2))
+# Hard cap on materialized pairwise values for order-statistic intervals; a
+# larger request would allocate gigabytes inside the local sidecar.
+MAX_PAIRWISE_VALUES = 25_000_000
 
 
 class AnalysisExecutionError(ValueError):
@@ -207,6 +211,45 @@ def _complete_case(
         f"complete_case:input={counts['input']};used={counts['used']};missing={counts['missing']}"
     ]
     return complete, counts, exclusions
+
+
+def _grouped_outcome(
+    frame: pd.DataFrame,
+    item: PlanItem,
+    *,
+    expected_levels: int | None = None,
+    minimum_levels: int | None = None,
+) -> tuple[list[np.ndarray], list[object], str, dict[str, int], list[str]]:
+    """Complete-case group extraction shared by the group-comparison executors."""
+    variables = _required_variables(item, 2)
+    outcome, exposure = variables[:2]
+    complete, counts, exclusions = _complete_case(
+        frame, [outcome, exposure], numeric=[outcome]
+    )
+    levels, order_strategy = _levels(complete[exposure], expected=expected_levels)
+    if minimum_levels is not None and len(levels) < minimum_levels:
+        raise AnalysisExecutionError(f"expected_at_least_{minimum_levels}_levels")
+    groups = [
+        np.sort(complete.loc[complete[exposure] == level, outcome].to_numpy(dtype=float))
+        for level in levels
+    ]
+    if any(group.size < 2 for group in groups):
+        raise AnalysisExecutionError("insufficient_group_observations")
+    return groups, levels, order_strategy, counts, exclusions
+
+
+def _order_statistic_interval(
+    sorted_values: np.ndarray, bound_estimate: float
+) -> tuple[float, float, list[str]]:
+    """Conservative (floored-rank) distribution-free interval from sorted values."""
+    bound_rank = int(np.floor(bound_estimate))
+    interval_warnings: list[str] = []
+    if bound_rank < 1:
+        bound_rank = 1
+        interval_warnings.append("nonparametric_ci_extreme_bounds")
+    lower = float(sorted_values[bound_rank - 1])
+    upper = float(sorted_values[sorted_values.size - bound_rank])
+    return lower, upper, interval_warnings
 
 
 def _provenance(
@@ -380,7 +423,7 @@ def run_welch_t(
     hedges_se = correction * np.sqrt(
         (n1 + n2) / (n1 * n2) + cohen_d**2 / (2.0 * (n1 + n2 - 2))
     )
-    normal_critical = float(stats.norm.ppf(1 - ALPHA / 2))
+    normal_critical = NORMAL_CRITICAL
     return _result(
         item=item,
         context=context,
@@ -494,7 +537,7 @@ def run_paired_t(
     hedges_se = correction * np.sqrt(
         1.0 / differences.size + cohen_dz**2 / (2.0 * (differences.size - 1))
     )
-    normal_critical = float(stats.norm.ppf(1 - ALPHA / 2))
+    normal_critical = NORMAL_CRITICAL
     return _result(
         item=item,
         context=context,
@@ -533,20 +576,9 @@ def run_paired_t(
 def run_welch_anova(
     frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
 ) -> AnalysisResult:
-    variables = _required_variables(item, 2)
-    outcome, exposure = variables[:2]
-    complete, counts, exclusions = _complete_case(
-        frame, [outcome, exposure], numeric=[outcome]
+    groups, _levels_list, order_strategy, counts, exclusions = _grouped_outcome(
+        frame, item, minimum_levels=3
     )
-    levels, order_strategy = _levels(complete[exposure])
-    if len(levels) < 3:
-        raise AnalysisExecutionError("expected_at_least_3_levels")
-    groups = [
-        np.sort(complete.loc[complete[exposure] == level, outcome].to_numpy(dtype=float))
-        for level in levels
-    ]
-    if any(group.size < 2 for group in groups):
-        raise AnalysisExecutionError("insufficient_group_observations")
     analysis = anova_oneway(groups, use_var="unequal", welch_correction=True)
     means = np.asarray([np.mean(group) for group in groups], dtype=float)
     variances = np.asarray([np.var(group, ddof=1) for group in groups], dtype=float)
@@ -633,7 +665,7 @@ def run_categorical_association(
         corrected += 0.5
     odds_ratio = float(corrected[0, 0] * corrected[1, 1] / (corrected[0, 1] * corrected[1, 0]))
     log_standard_error = float(np.sqrt(np.sum(1.0 / corrected)))
-    critical = float(stats.norm.ppf(1 - ALPHA / 2))
+    critical = NORMAL_CRITICAL
     lower = float(np.exp(np.log(odds_ratio) - critical * log_standard_error))
     upper = float(np.exp(np.log(odds_ratio) + critical * log_standard_error))
     phi = float(np.sqrt(chi_square / counts["used"]))
@@ -665,9 +697,14 @@ def run_categorical_association(
     )
 
 
-def run_correlation(
-    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+def _run_rank_or_linear_correlation(
+    frame: pd.DataFrame,
+    item: PlanItem,
+    context: _ExecutionContext,
+    *,
+    selected_test: str,
 ) -> AnalysisResult:
+    """Shared complete-case, guard, and Fisher-z logic for both correlations."""
     variables = _required_variables(item, 2)
     outcome, exposure = variables[:2]
     complete, counts, exclusions = _complete_case(
@@ -680,14 +717,23 @@ def run_correlation(
     y = ordered[outcome].to_numpy(dtype=float)
     if np.ptp(x) == 0 or np.ptp(y) == 0:
         raise AnalysisExecutionError("insufficient_variation")
-    analysis = stats.pearsonr(x, y)
+    if selected_test == "spearman":
+        analysis = stats.spearmanr(x, y)
+        z_se = 1.03 / np.sqrt(counts["used"] - 3)
+        effect_name = "spearman_rho"
+        interval_method = "fisher_z_fieller_se"
+        transformations = ["complete_case", "rowwise_pairing", "rank_transformation"]
+    else:
+        analysis = stats.pearsonr(x, y)
+        z_se = 1.0 / np.sqrt(counts["used"] - 3)
+        effect_name = "pearson_r"
+        interval_method = "fisher_z"
+        transformations = ["complete_case", "rowwise_pairing"]
     estimate = _safe_float(analysis.statistic, "non_finite_estimate")
     clipped = float(np.clip(estimate, -1.0 + np.finfo(float).eps, 1.0 - np.finfo(float).eps))
     fisher_z = float(np.arctanh(clipped))
-    z_se = 1.0 / np.sqrt(counts["used"] - 3)
-    critical = float(stats.norm.ppf(1 - ALPHA / 2))
-    lower = float(np.tanh(fisher_z - critical * z_se))
-    upper = float(np.tanh(fisher_z + critical * z_se))
+    lower = float(np.tanh(fisher_z - NORMAL_CRITICAL * z_se))
+    upper = float(np.tanh(fisher_z + NORMAL_CRITICAL * z_se))
     return _result(
         item=item,
         context=context,
@@ -695,38 +741,37 @@ def run_correlation(
         estimate=estimate,
         p_value=_p_value(analysis.pvalue),
         interval=(lower, upper),
-        effect_name="pearson_r",
+        effect_name=effect_name,
         effect_value=estimate,
         diagnostics={
             "counts": counts,
-            "selected_test": "pearson",
-            "confidence_interval_method": "fisher_z",
+            "selected_test": selected_test,
+            "confidence_interval_method": interval_method,
         },
         exclusions=exclusions,
-        transformations=["complete_case", "rowwise_pairing"],
+        transformations=transformations,
     )
+
+
+def run_correlation(
+    frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
+) -> AnalysisResult:
+    return _run_rank_or_linear_correlation(frame, item, context, selected_test="pearson")
 
 
 def run_mann_whitney(
     frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
 ) -> AnalysisResult:
-    variables = _required_variables(item, 2)
-    outcome, exposure = variables[:2]
-    complete, counts, exclusions = _complete_case(
-        frame, [outcome, exposure], numeric=[outcome]
+    groups, _levels_list, order_strategy, counts, exclusions = _grouped_outcome(
+        frame, item, expected_levels=2
     )
-    levels, order_strategy = _levels(complete[exposure], expected=2)
-    groups = [
-        np.sort(complete.loc[complete[exposure] == level, outcome].to_numpy(dtype=float))
-        for level in levels
-    ]
-    if any(group.size < 2 for group in groups):
-        raise AnalysisExecutionError("insufficient_group_observations")
     first, second = groups
     pooled = np.concatenate(groups)
     if np.ptp(pooled) == 0:
         raise AnalysisExecutionError("insufficient_variation")
     n1, n2 = int(first.size), int(second.size)
+    if n1 * n2 > MAX_PAIRWISE_VALUES:
+        raise AnalysisExecutionError("nonparametric_interval_size_limit_exceeded")
     has_ties = int(np.unique(pooled).size) < int(pooled.size)
     p_value_method = "exact" if not has_ties and max(n1, n2) <= 25 else "asymptotic"
     test = stats.mannwhitneyu(
@@ -735,16 +780,10 @@ def run_mann_whitney(
     u_statistic = _safe_float(test.statistic, "non_finite_test_statistic")
     differences = np.sort(np.subtract.outer(first, second).ravel())
     estimate = float(np.median(differences))
-    normal_critical = float(stats.norm.ppf(1 - ALPHA / 2))
-    bound_rank = int(
-        round(n1 * n2 / 2 - normal_critical * np.sqrt(n1 * n2 * (n1 + n2 + 1) / 12.0))
+    lower, upper, result_warnings = _order_statistic_interval(
+        differences,
+        n1 * n2 / 2 - NORMAL_CRITICAL * np.sqrt(n1 * n2 * (n1 + n2 + 1) / 12.0),
     )
-    result_warnings: list[str] = []
-    if bound_rank < 1:
-        bound_rank = 1
-        result_warnings.append("nonparametric_ci_extreme_bounds")
-    lower = float(differences[bound_rank - 1])
-    upper = float(differences[differences.size - bound_rank])
     rank_biserial = 2.0 * u_statistic / (n1 * n2) - 1.0
     return _result(
         item=item,
@@ -767,6 +806,7 @@ def run_mann_whitney(
             "confidence_interval_method": (
                 "hodges_lehmann_order_statistic_normal_approximation"
             ),
+            "confidence_interval_bound_rank_rule": "floor_conservative",
         },
         exclusions=exclusions,
         transformations=[
@@ -804,27 +844,21 @@ def run_wilcoxon_signed_rank(
     t_plus = float(np.sum(ranks[nonzero > 0]))
     t_minus = float(np.sum(ranks[nonzero < 0]))
     rank_biserial = (t_plus - t_minus) / (t_plus + t_minus)
+    pair_count = int(nonzero.size)
+    if pair_count * (pair_count + 1) // 2 > MAX_PAIRWISE_VALUES:
+        raise AnalysisExecutionError("nonparametric_interval_size_limit_exceeded")
     walsh = np.sort(
         (np.add.outer(nonzero, nonzero) / 2.0)[np.triu_indices(nonzero.size)]
     )
     estimate = float(np.median(walsh))
-    pair_count = int(nonzero.size)
-    normal_critical = float(stats.norm.ppf(1 - ALPHA / 2))
-    bound_rank = int(
-        round(
-            walsh.size / 2
-            - normal_critical
-            * np.sqrt(pair_count * (pair_count + 1) * (2 * pair_count + 1) / 24.0)
-        )
+    lower, upper, result_warnings = _order_statistic_interval(
+        walsh,
+        walsh.size / 2
+        - NORMAL_CRITICAL
+        * np.sqrt(pair_count * (pair_count + 1) * (2 * pair_count + 1) / 24.0),
     )
-    result_warnings: list[str] = []
-    if bound_rank < 1:
-        bound_rank = 1
-        result_warnings.append("nonparametric_ci_extreme_bounds")
     if zero_dropped:
         result_warnings.append("zero_differences_dropped")
-    lower = float(walsh[bound_rank - 1])
-    upper = float(walsh[walsh.size - bound_rank])
     return _result(
         item=item,
         context=context,
@@ -847,6 +881,7 @@ def run_wilcoxon_signed_rank(
             "confidence_interval_method": (
                 "walsh_average_order_statistic_normal_approximation"
             ),
+            "confidence_interval_bound_rank_rule": "floor_conservative",
         },
         exclusions=exclusions,
         transformations=[
@@ -862,27 +897,13 @@ def run_wilcoxon_signed_rank(
 def run_kruskal_wallis(
     frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
 ) -> AnalysisResult:
-    variables = _required_variables(item, 2)
-    outcome, exposure = variables[:2]
-    complete, counts, exclusions = _complete_case(
-        frame, [outcome, exposure], numeric=[outcome]
+    groups, levels, order_strategy, counts, exclusions = _grouped_outcome(
+        frame, item, minimum_levels=3
     )
-    levels, order_strategy = _levels(complete[exposure])
-    if len(levels) < 3:
-        raise AnalysisExecutionError("expected_at_least_3_levels")
-    groups = [
-        np.sort(complete.loc[complete[exposure] == level, outcome].to_numpy(dtype=float))
-        for level in levels
-    ]
-    if any(group.size < 2 for group in groups):
-        raise AnalysisExecutionError("insufficient_group_observations")
     pooled = np.concatenate(groups)
     if np.ptp(pooled) == 0:
         raise AnalysisExecutionError("insufficient_variation")
-    try:
-        h_statistic, omnibus_p = stats.kruskal(*groups)
-    except ValueError as exc:
-        raise AnalysisExecutionError("insufficient_variation") from exc
+    h_statistic, omnibus_p = stats.kruskal(*groups)
     total_n = int(pooled.size)
     group_count = len(groups)
     epsilon_squared = (float(h_statistic) - group_count + 1) / (total_n - group_count)
@@ -960,43 +981,7 @@ def run_kruskal_wallis(
 def run_spearman(
     frame: pd.DataFrame, item: PlanItem, context: _ExecutionContext
 ) -> AnalysisResult:
-    variables = _required_variables(item, 2)
-    outcome, exposure = variables[:2]
-    complete, counts, exclusions = _complete_case(
-        frame, [outcome, exposure], numeric=[outcome, exposure]
-    )
-    if counts["used"] < 4:
-        raise AnalysisExecutionError("insufficient_correlation_observations")
-    ordered = complete.sort_values([exposure, outcome], kind="mergesort")
-    x = ordered[exposure].to_numpy(dtype=float)
-    y = ordered[outcome].to_numpy(dtype=float)
-    if np.ptp(x) == 0 or np.ptp(y) == 0:
-        raise AnalysisExecutionError("insufficient_variation")
-    analysis = stats.spearmanr(x, y)
-    estimate = _safe_float(analysis.statistic, "non_finite_estimate")
-    clipped = float(np.clip(estimate, -1.0 + np.finfo(float).eps, 1.0 - np.finfo(float).eps))
-    fisher_z = float(np.arctanh(clipped))
-    z_se = 1.03 / np.sqrt(counts["used"] - 3)
-    critical = float(stats.norm.ppf(1 - ALPHA / 2))
-    lower = float(np.tanh(fisher_z - critical * z_se))
-    upper = float(np.tanh(fisher_z + critical * z_se))
-    return _result(
-        item=item,
-        context=context,
-        n=counts["used"],
-        estimate=estimate,
-        p_value=_p_value(analysis.pvalue),
-        interval=(lower, upper),
-        effect_name="spearman_rho",
-        effect_value=estimate,
-        diagnostics={
-            "counts": counts,
-            "selected_test": "spearman",
-            "confidence_interval_method": "fisher_z_fieller_se",
-        },
-        exclusions=exclusions,
-        transformations=["complete_case", "rowwise_pairing", "rank_transformation"],
-    )
+    return _run_rank_or_linear_correlation(frame, item, context, selected_test="spearman")
 
 
 def _design_matrix(

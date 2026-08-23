@@ -51,6 +51,35 @@ Canonical external anchors reproduced exactly by the module: n=64/group for
 d=0.5 (Cohen), n=97/group for p₁=0.6 vs p₂=0.4 (G*Power), n=30 for r=0.5
 (Hulley sample-size tables).
 
+## Two-proportion convention: arcsine vs pooled z (added after supervisor review)
+
+The two-proportion module uses Cohen's arcsine transform (h). The canonical
+n=97 anchor sits at a symmetric point where the arcsine and classical pooled-z
+constructions agree, so it does not discriminate between them. Measured per-group
+n (α=0.05, power=0.80, two-sided):
+
+| p₁ vs p₂ | arcsine (production) | pooled z | Δ |
+|---|---|---|---|
+| 0.40 vs 0.60 | 96.79 | 96.92 | −0.1% |
+| 0.05 vs 0.20 | 69.20 | 75.12 | −7.9% |
+| 0.02 vs 0.10 | 121.32 | 137.15 | −11.5% |
+
+For rare outcomes the arcsine convention systematically yields the smaller n.
+Both are legitimate published conventions; the applied one is now named
+explicitly in the API response (`method:
+statsmodels_normal_solver_arcsine_transform:cohen_h`) and pinned by a
+regression test at the asymmetric 0.05 vs 0.20 point. Planners of rare-outcome
+studies should be aware that a pooled-z design would require more subjects.
+
+## Known validation boundary
+
+The Dunn z→p tail probability uses `scipy.stats.norm.sf` in both production and
+the independent reference (scikit-posthocs also depends on scipy), so the normal
+tail function itself is shared rather than independently validated. The Dunn
+statistic formula, tie correction, and Holm adjustment are independently
+confirmed; validating the tail function would require a non-scipy stack (e.g. R),
+which was not available on this machine.
+
 ## Conclusion
 
 All Dunn/Holm quantities match an independent implementation to ≤1 ulp; all

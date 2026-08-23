@@ -144,6 +144,29 @@ def test_invalid_requests_fail_closed(overrides: dict, expected: str) -> None:
         compute_power(request(**overrides))
 
 
+def test_non_converged_solver_fails_closed_instead_of_reporting_a_start_value() -> None:
+    """statsmodels returns its brentq start value on non-convergence; reporting it
+    as a required sample size would silently misplan a study."""
+    with pytest.raises(PowerValidationError, match="sample_size_solution_failed"):
+        compute_power(request(effect_size=9.0))
+
+
+def test_two_proportions_method_names_the_arcsine_convention() -> None:
+    """The output must say which two-proportion convention was applied; the
+    arcsine and pooled-z constructions diverge for rare outcomes."""
+    result = compute_power(
+        request(
+            analysis="two_proportions",
+            effect_size=None,
+            proportion_one=0.05,
+            proportion_two=0.20,
+        )
+    )
+
+    assert result.method == "statsmodels_normal_solver_arcsine_transform:cohen_h"
+    assert result.sample_size == pytest.approx(69.198, abs=0.01)
+
+
 def test_power_endpoint_is_stateless_and_session_authenticated(client) -> None:
     """The calculator must not require a project and must reject missing tokens."""
     payload = {

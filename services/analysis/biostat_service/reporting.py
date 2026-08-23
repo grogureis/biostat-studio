@@ -20,6 +20,7 @@ from docx.shared import Inches, Pt, RGBColor, Twips
 from biostat_service.analyses import AnalysisBundle
 from biostat_service.contracts import AnalysisPlan, AnalysisResult, PlanItem, StudyBrief
 from biostat_service.projects import LocalProject
+from biostat_service.study_model import GROUP_FIGURE_METHOD_IDS, PAIRED_METHOD_IDS
 from biostat_service.visuals import FigureArtifact
 
 
@@ -47,17 +48,8 @@ SAFE_SOFTWARE_COMPONENTS = frozenset(
     {"python", "numpy", "pandas", "scipy", "statsmodels"}
 )
 SAFE_TRANSFORMATIONS = frozenset({"deterministic_analysis_execution"})
-REPORT_FIGURE_METHODS = frozenset(
-    {
-        "welch_t_test",
-        "paired_t_test",
-        "welch_anova",
-        "mann_whitney_u",
-        "wilcoxon_signed_rank",
-        "kruskal_wallis",
-    }
-)
-PAIRED_REPORT_METHODS = frozenset({"paired_t_test", "wilcoxon_signed_rank"})
+REPORT_FIGURE_METHODS = GROUP_FIGURE_METHOD_IDS
+PAIRED_REPORT_METHODS = PAIRED_METHOD_IDS
 POSTHOC_COLUMN_WIDTHS_DXA = (4560, 1600, 1600, 1600)
 OBSERVATIONAL_DESIGNS = frozenset({"cross_sectional", "cohort", "case_control"})
 FIXED_METADATA_TIME = datetime(2000, 1, 1, tzinfo=timezone.utc)
