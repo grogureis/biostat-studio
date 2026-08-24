@@ -1,0 +1,54 @@
+{
+  "_amac": "Cikarim motorlarini (kural / yerel LLM / bulut) ayni metinler uzerinde karsilastirmak.",
+  "_kaynak": "PubMed Central acik erisim. Metinler BU DEPOYA KONULMADI - yeniden dagitim lisansi belirsiz. fetch_corpus.py PMC kimliklerinden indirir.",
+  "_etiketleme": "Altin etiketler ELLE atandi (2026-08-24). MeSH etiketi KULLANILMADI: olculdu ki guvenilmez - PMC11018262 MeSH'te case_control gorunuyor ama metni 'retrospective longitudinal cohort study' diyor.",
+  "_durum": "Bu bir ON OLCUM seti (n=12 puanlanan), spec 8'deki gercek gold set DEGIL. Gercek set 30-50 eleme + 15 kasitli kabul seti olacak.",
+
+  "_olculen_sinirlar": [
+    "Tasarim siniflandirmasi uc motoru da ayirt EDEMIYOR. Ayirt edici gorev bu degil.",
+    "Ingilizce sette hic `repeated` ornegi yok - kural motorunu isiran kategori tam olarak oydu.",
+    "Kavram cikarimi (sonuc/maruziyet/kovaryat) HIC olculmedi. Karar orada verilecek."
+  ],
+
+  "_KRITIK_UYARI_korpus_cikarimi_olcumu_degistiriyor": {
+    "bulgu": "Ayni PMC kimlikleri, iki farkli Methods-cikarma kuraliyla FARKLI skorlar veriyor. Ilk probe 'ilk >400 karakterlik method bolumunu al' kullandi: kural 9/9, 14b 9/9, TR 14b 3/3. Bu depodaki fetch_corpus 'en uzun method bolumunu al' kullaniyor: kural 7/9, 14b 7/9, TR 2/3.",
+    "neden_onemli": "Spec 5 zaten uyariyordu: bolum bulucu motordan bagimsiz olmali, yoksa olculen sey motor degil kirpma olur. Ayni tuzak KORPUS KURUCU icin de gecerli ve bu sefer ona dustuk.",
+    "sonuc": "Bu iki olcum KARSILASTIRILAMAZ. Gercek gold set kurulmadan once korpus cikarma kurali SABITLENMELI ve gold_set.json icinde yazili olmali; degistigi anda tum eski sayilar gecersizdir.",
+    "olculdu": "2026-08-24"
+  },
+
+  "_acik_urun_sorusu": "Tasarimini adlandirmayan ama 'retrospektif gozlemsel calisma' diyen bir metnin dogru cevabi nedir? (a) cohort - epidemiyolojik konvansiyon. (b) None - spec'in 'emin olmadigi yeri bos birakir' kurali. Gercek Turkce metinlerin YARISI bu durumda. Karar verilmedi.",
+
+  "en": [
+    {"pmc": "11018262", "gold": "cohort",          "kanit": "single-center retrospective longitudinal cohort study", "not": "kohort+longitudinal deseni; kural motoru eskiden `repeated` diyordu (MF1)"},
+    {"pmc": "12170779", "gold": "cohort",          "kanit": "CORDELIA Study, recruited 1989-2020, completed follow-up", "not": "2690. karakterde baska bir calismayi aniyor: 'MultiCase-Control Study-Spain'. Alinti-vs-tasarim tuzagi."},
+    {"pmc": "10798495", "gold": "cohort",          "kanit": "nationally representative longitudinal dataset", "kesinlik": "orta"},
+    {"pmc": "11604010", "gold": "cross_sectional", "kanit": "A cross-sectional study of 472 Chinese COs"},
+    {"pmc": "10830945", "gold": "cross_sectional", "kanit": "Qanuilirpitaa? 2017 is a cross-sectional survey"},
+    {"pmc": "10830095", "gold": "cross_sectional", "kanit": "This cross-sectional study was conducted"},
+    {"pmc": "11145153", "gold": "trial",           "kanit": "assessor-blind randomized controlled clinical trial parallel group 1:1"},
+    {"pmc": "4488119",  "gold": "trial",           "kanit": "Using a randomized controlled design"},
+    {"pmc": "9801609",  "gold": "case_control",    "kanit": "Hospital-based case-control study", "not": "EN DASH ile yazilmis; kural motoru eskiden kaciriyordu"}
+  ],
+
+  "tr": [
+    {"pmc": "13482243", "gold": "cohort", "kanit": "Bu retrospektif gozlemsel kohort calismada"},
+    {"pmc": "13478482", "gold": "cohort", "kanit": "retrospektif gozlemsel kohort olarak tarandi"},
+    {"pmc": "13478493", "gold": "trial",  "kanit": "Yirmi dort eriskin Wistar albino sican rastgele dort gruba ayrildi", "not": "kural motoru KACIRIYOR - 'rastgele' Turkce randomizasyon karsiligi desende yok"}
+  ],
+
+  "tr_puanlanmayan": [
+    {"pmc": "13168742", "not": "tasarim adlandirilmamis - '44 hastanin verilerini retrospektif olarak inceledik'"},
+    {"pmc": "13478485", "not": "tasarim adlandirilmamis - 'Bu retrospektif calisma'"},
+    {"pmc": "13478481", "not": "tasarim adlandirilmamis - 'Bu retrospektif, tek merkezli, gozlemsel calisma'"}
+  ],
+
+  "sonraki_korpus_adaylari": {
+    "_not": "Cekildi ve nitelik kapisindan gecti (>2500 karakter, eksiksiz Methods). ETIKETLENMEDI.",
+    "trial": ["4066268"],
+    "cohort": ["9305214"],
+    "case_control": ["7328684"],
+    "cross_sectional": ["8713373", "10465060", "4876238"],
+    "repeated": ["280679", "10012800", "13185788"]
+  }
+}
