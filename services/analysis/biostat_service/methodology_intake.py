@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,3 +93,67 @@ def extract_document(path: Path) -> MethodologyDocument:
         truncated=truncated,
         warnings=tuple(warnings),
     )
+
+
+# Bölüm başlıkları TR+EN. Sıra önemsiz; hepsi taranır ve metindeki konumlarına
+# göre sıralanır. Başlığın kendisi de seçime dahil edilir çünkü çıkarım motoru
+# "Yöntem" kelimesini bağlam olarak kullanır.
+SECTION_HEADINGS = (
+    "gereç ve yöntem",
+    "gerec ve yontem",
+    "yöntem",
+    "yontem",
+    "yöntemler",
+    "istatistiksel analiz",
+    "istatistik analiz",
+    "materials and methods",
+    "methods",
+    "methodology",
+    "statistical analysis",
+    "study design",
+)
+
+# Bir sonraki bölümün başladığını gösteren başlıklar — seçim burada durur.
+STOP_HEADINGS = (
+    "bulgular",
+    "sonuçlar",
+    "sonuclar",
+    "tartışma",
+    "tartisma",
+    "kaynaklar",
+    "results",
+    "discussion",
+    "conclusion",
+    "references",
+)
+
+
+def _heading_positions(lowered: str, headings: tuple[str, ...]) -> list[int]:
+    positions: list[int] = []
+    for heading in headings:
+        for match in re.finditer(rf"^\s*{re.escape(heading)}\b.*$", lowered, re.MULTILINE):
+            positions.append(match.start())
+    return sorted(positions)
+
+
+def select_relevant_text(text: str, budget: int) -> tuple[str, tuple[str, ...]]:
+    """Return the methodology-relevant slice of a document, bounded by budget.
+
+    Deterministic and engine-independent: every extractor receives the same
+    slice, so a gold-set comparison measures the engine and not the cropping.
+    """
+    lowered = text.lower()
+    starts = _heading_positions(lowered, SECTION_HEADINGS)
+
+    if not starts:
+        return text[:budget], ("no_method_section",)
+
+    stops = _heading_positions(lowered, STOP_HEADINGS)
+    chunks: list[str] = []
+    for start in starts:
+        following = [stop for stop in stops if stop > start]
+        end = following[0] if following else len(text)
+        chunks.append(text[start:end])
+
+    selected = "\n".join(chunks)
+    return selected[:budget], ()

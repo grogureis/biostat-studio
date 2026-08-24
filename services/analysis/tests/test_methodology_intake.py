@@ -13,6 +13,7 @@ from biostat_service.methodology_intake import (
     MethodologyDocument,
     MethodologyIntakeError,
     extract_document,
+    select_relevant_text,
 )
 
 
@@ -178,3 +179,47 @@ def test_pdf_with_text_layer_round_trips_known_text(tmp_path: Path) -> None:
 
     assert result.source_format == "pdf"
     assert "Retrospective cohort study" in result.text
+
+
+def test_selects_turkish_method_section() -> None:
+    text = (
+        "Giriş\nAlakasız giriş metni.\n"
+        "Gereç ve Yöntem\nRetrospektif kohort tasarımı kullanıldı.\n"
+        "Bulgular\nAlakasız bulgu metni.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert "Retrospektif kohort tasarımı" in selected
+    assert "Alakasız bulgu metni" not in selected
+    assert warnings == ()
+
+
+def test_selects_english_method_section() -> None:
+    text = (
+        "Introduction\nIrrelevant.\n"
+        "Materials and Methods\nA retrospective cohort design was used.\n"
+        "Results\nIrrelevant results.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert "retrospective cohort design" in selected
+    assert "Irrelevant results" not in selected
+
+
+def test_falls_back_to_prefix_and_warns_when_no_section_found() -> None:
+    text = "Başlıksız düz metin. " * 100
+
+    selected, warnings = select_relevant_text(text, budget=200)
+
+    assert selected == text[:200]
+    assert warnings == ("no_method_section",)
+
+
+def test_selection_never_exceeds_budget() -> None:
+    text = "İstatistiksel Analiz\n" + ("veri " * 5000)
+
+    selected, _ = select_relevant_text(text, budget=300)
+
+    assert len(selected) <= 300
