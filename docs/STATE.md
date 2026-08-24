@@ -113,10 +113,56 @@ Madde 0b "Plan 2 doküman metnine dönüş yolunu kendisi kurmak zorunda" diyord
     `select_relevant_text` zaten 12.000 karaktere kırpıyor (`rule.py:19 SELECTION_BUDGET`).
     Sunucu durumsuz kalır, yeni token yok, dosya ikinci kez okunmaz.
 
-**8c'nin tavsiyesi: (c).** Gerekçe: üçü arasında **yeni durum yaratmayan tek yol**. Metin
-zaten `evidence` alanlarıyla parça parça renderer'a iniyor; gizlilik sınırı hasta verisinde
-ve o sınır `ColumnSummary`'de hücre değeri olmamasıyla korunuyor — metodoloji metni o
-sınırın içinde değil. **Karar verilmedi.**
+**8c'nin ilk tavsiyesi (c) idi ve YANLIŞ ÖNCÜLE dayanıyordu.** Öncül: "metin yalnızca Excel
+eşleştirmesi sırasında lazım, o hâlde taşınması yeter." Erdem bunu düzeltti (2026-08-24):
+
+> *"metodoloji — çalışmanın PICO'su için de gerekli, istatistiksel planlama için de gerekli.
+> Sadece Excel'i aldığımızda gerekli olarak ifade edersek yanılırız. Kullanıcı uygulamaya
+> belge yükleyecek, orada onu muhafaza etmeli."*
+
+Belge geçici bir girdi değil, **çalışmanın kalıcı parçası**. Taşıma değil, ev gerekiyor.
+
+---
+
+#### KARAR — 8c, Erdem'in devrettiği yetkiyle (*"en randımanlı nerede ise öyle saklasın, sen belirle"*)
+
+**Çıkarılan metin proje klasöründe yaşar. Orijinal belge kopyalanmaz. Renderer yalnızca
+proje doğana kadar köprüdür.**
+
+Kararı belirleyen ölçüm — **desen zaten var:** `projects.py:508` Excel'i projeye
+**kopyalıyor** (`source/source.xlsx`, `test_projects.py:75` doğruluyor). Yani `.biostat`
+klasörü hâlihazırda kendi kendine yeten bir kayıt; belgeyi oraya koymak yeni bir kavram
+değil, var olanı genişletmek.
+*(Yan bulgu: `create_project` docstring'i "without copying its source dataset" diyor —
+**yanlış**, kopyalıyor. Düzeltilmeli.)*
+
+**Neden metin, orijinal dosya değil:**
+- Belgeden çıkarılabilecek tek şey metindi ve çıkarıldı; `.docx`/`.pdf` bir daha okunmayacak.
+- Metin ≤200.000 karakter ≈ 200 KB. Excel farklı: veri tekrar tekrar okunuyor, hash'i
+  doğrulanıyor, satır satır analiz ediliyor — orada dosyanın kendisi gerekli.
+- Denetim için dosya adı + `sha256` + format saklanır; "hangi belgeden geldi" cevaplanır.
+
+**Ham metin saklanır, kırpılmış seçim DEĞİL.** `select_relevant_text` her okumada yeniden
+hesaplanır. Gerekçe madde 0c'nin ölçülmüş tuzağı: çıkarma kuralı değişince eski sayılar
+geçersizleşiyor. Ham metin duruyorsa kural değişse de eski projeler yeni kuralla okunur.
+
+**Akış:**
+1. `/v1/methodology/extract` yanıtına tam `text` + `source_name` eklenir.
+2. Renderer bunu tutar — ama `StudyBrief.tsx`'in yerel state'inde değil, **App/store
+   seviyesinde** (bugün yerel; `StudyBrief.tsx:117`).
+3. `POST /v1/projects` isteğine `methodology` bloğu eklenir → `create_project` onu
+   `source/methodology.txt` + manifest `methodology: {sha256, format, char_count,
+   truncated, original_name}` olarak yazar.
+4. Proje zaten açıkken belge yüklenirse `POST /v1/projects/{id}/methodology` aynı yere
+   yazar; `AUDIT_EVENT_TYPES`'a `methodology_document_attached` eklenir.
+5. Sonraki her tüketici — PICO doldurma, değişken eşleştirme, çelişki açıklaması, LLM
+   planlama — metni **projeden** okur. Renderer bir daha taşımaz.
+
+**Kabul edilen sınır, gizlenmiyor:** proje yaratılmadan (yani Excel verilmeden) uygulama
+kapanırsa metin kaybolur, belge yeniden yüklenir. Bu pencereyi kapatmak proje-öncesi
+kalıcı taslak deposu demek (TTL + temizlik + çakışma) — 0d'de reddedilen (a)'nın ta kendisi.
+Faydası birkaç saniyelik tekrar yükleme; bedeli evict edilmeyen durum. **Ölçülmedi**,
+kullanıcı bu pencerede sık kapatıyorsa karar yeniden açılmalı.
 
 ### 0e. Plan 2'nin işini kolaylaştıran iki hazır altyapı `[ÖLÇÜM 2026-08-24, oturum 8c]`
 Plan 2 sıfırdan kurmayacak; ikisi de çalışır durumda:
@@ -266,9 +312,11 @@ girişine yeni bir adım ekliyor. Kabul testi zaten bir kez importta patlamışt
 değişken eşleştirme + çelişki çözümü + `confirmed` bayrağının düzeltilmesi.
 **Başlamadan önce madde 0b'yi okuyun** — özellikle spec §4 Karar B'nin dayanaksız kalmış
 gerekçesini; Plan 2 doküman metnine geri dönüş yolunu kendisi kurmak zorunda.
-**BLOKE:** madde **0d** — metne dönüş yolu (a/b/c) seçilmeden plan yazılmaya başlanmadı;
-görev sırası bu seçime bağlı. 8c'nin tavsiyesi (c). Ayrıca madde **0e**: `_validated_roles`
-ve `_apply_approved_kinds` hazır, Plan 2 onların üstüne kurulmalı — yeniden yazmamalı.
+**BLOKE DEĞİL ARTIK:** madde **0d** kararı verildi (2026-08-24, Erdem yetkiyi devretti) —
+çıkarılan ham metin proje klasöründe (`source/methodology.txt` + manifest bloğu) yaşar,
+renderer yalnızca proje doğana kadar köprü. Plan 2 buradan başlar.
+Ayrıca madde **0e**: `_validated_roles` ve `_apply_approved_kinds` hazır, Plan 2 onların
+üstüne kurulmalı — yeniden yazmamalı.
 
 **3. Plan 3'ü yaz** (spec §7-§8): blocking sözlüğü + gold set + ölçüm + `LocalExtractor`.
 Motor seçimi **ölçümsüz yapılmayacak**. Ollama kurulu ve ayakta, **yüklü model yok**
