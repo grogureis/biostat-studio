@@ -73,6 +73,64 @@ DESIGN_PATTERNS: tuple[tuple[str, str], ...] = (
 # şey elemeyen bir güvenlik kapısıdır.
 RULE_CONFIDENCE = 0.7
 
+# Kavram kalıpları. Her kalıp, ARDINDAN gelen metnin kavram olduğunu iddia
+# eder — TEK istisnayla, bkz. _BACKWARD_TRIGGER. Kalıplar dar: "sonuç" tek
+# başına yok (Türkçe'de "sonuç olarak" bağlacı her metodoloji metninde geçer
+# ve her seferinde yanlış eşleşirdi).
+CONCEPT_PATTERNS: tuple[tuple[str, str], ...] = (
+    (
+        "outcome",
+        r"(?:birincil|primer|ana)\s+(?:sonlan[ıi]m|son\s+nokta|[çc][ıi]kt[ıi])"
+        r"|primary\s+(?:outcome|endpoint)|ba[ğg][ıi]ml[ıi]\s+de[ğg]i[şs]ken",
+    ),
+    (
+        "exposure",
+        r"maruziyet|ba[ğg][ıi]ms[ıi]z\s+de[ğg]i[şs]ken|exposure(?:\s+variable)?",
+    ),
+    (
+        "covariate",
+        r"kovaryat|covariates?|d[üu]zeltil(?:di|erek|mi[şs])|adjusted\s+for"
+        r"|kar[ıi][şs]t[ıi]r[ıi]c[ıi]|confounder",
+    ),
+)
+
+# Bu tek alt-kalıp eşleştiğinde kavram listesi eşleşmenin ÖNÜNDE yer alır:
+# Türkçe "yaş, cinsiyet için düzeltildi" = "adjusted for age, sex", ama fiil
+# cümlenin SONUNDA. CONCEPT_PATTERNS'teki her diğer tetikleyici (kovaryat,
+# covariates, adjusted for, karıştırıcı, confounder, birincil sonlanım,
+# maruziyet, ...) ileriye bakar; yalnızca bu fiil çekimleri geriye bakar.
+_BACKWARD_TRIGGER = re.compile(r"d[üu]zeltil(?:di|erek|mi[şs])", re.IGNORECASE)
+
+# Geriye bakan ayrıştırmada, listenin ÖNÜNDEKİ cümle öznesini (fiilin
+# kendisini değil, cümlenin gerçek öznesini) kavram sanmamak için atılan
+# dar, kapalı bir sözcük seti. Ölçüldü: "Modeller yaş, cinsiyet ... için
+# düzeltildi" cümlesinde regex "Modeller"i "yaş" ile GRAMER OLARAK ayırt
+# edemez — ikisi de virgülsüz, tek boşlukla ayrılmış sözcükler, tıpkı
+# "vücut kitle indeksi" gibi (o da içeride virgülsüz, boşlukla ayrılmış üç
+# sözcük). Sözcüksel bir liste dışında ayırma yolu yok. Bu listenin
+# dışındaki öznelerde yanlış davranır (özneyi kavram sayar) — bu genelleme
+# ÖLÇÜLMEDİ, yalnızca bu kalıbın kapsadığı örnekler için doğrulandı.
+_ADJUSTMENT_SUBJECT = re.compile(
+    r"^\s*(?:modeller|model|analizler|analiz)\s+",
+    re.IGNORECASE,
+)
+
+# Kalıptan sonra (ya da önce) art arda gelen kavramları ayıran bağlaçlar.
+_SPLIT = re.compile(r",|\bve\b|\band\b|\bile\b", re.IGNORECASE)
+
+# Adayın kuyruğundaki gramer artığını temizler: "... olarak tanımlandı",
+# "... için düzeltildi", cümle sonu noktalama.
+_TRAILING = re.compile(
+    r"\s*(?:i[çc]in\s+)?d[üu]zeltil\w*|\s*olarak\s+\w+|\s*[.;]\s*$",
+    re.IGNORECASE,
+)
+
+# Bir kavram adı için makul uzunluk penceresi. Alt sınır: tek harfli parçalar
+# ayrıştırma artığıdır. Üst sınır: 60 karakteri aşan bir parça artık bir
+# değişken adı değil, cümlenin geri kalanıdır.
+CONCEPT_MIN_CHARS = 2
+CONCEPT_MAX_CHARS = 60
+
 
 class RuleExtractor:
     """Keyword-based extractor with no external dependency."""
@@ -87,6 +145,15 @@ class RuleExtractor:
 
         return BriefProposal(
             design=self._design(document.text, selected),
+            outcome_concepts=self._concepts(
+                document.text, selected, CONCEPT_PATTERNS[0][1]
+            ),
+            exposure_concepts=self._concepts(
+                document.text, selected, CONCEPT_PATTERNS[1][1]
+            ),
+            covariate_concepts=self._concepts(
+                document.text, selected, CONCEPT_PATTERNS[2][1]
+            ),
             warnings=warnings,
         )
 
@@ -131,6 +198,75 @@ class RuleExtractor:
             evidence_offset=evidence_offset,
             source=self.name,
         )
+
+    def _concepts(
+        self, original_text: str, text: str, pattern: str
+    ) -> tuple[Proposal, ...]:
+        """Extract concept names anchored to one trigger pattern, or nothing.
+
+        Every trigger in `pattern` places its concept AFTER itself, except
+        the Turkish adjustment-verb alternative ("düzeltildi" /
+        "düzeltilerek" / "düzeltilmiş"), whose covariate list sits BEFORE
+        it — see `_BACKWARD_TRIGGER`. A trigger that fires but yields no
+        candidate inside CONCEPT_MIN/MAX_CHARS contributes nothing: this is
+        the "leave it empty rather than guess" rule applied per-candidate,
+        not just per-sentence.
+        """
+        found: list[Proposal] = []
+        seen: set[str] = set()
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            sentence = self._sentence_around(text, match.start())
+            # Same reasoning as `_design`: `text` may be a non-contiguous
+            # merge of several method sections, so the offset published to
+            # the HTTP response is relocated in `original_text` — the only
+            # copy where an offset is guaranteed to mean what it says.
+            located = original_text.find(sentence)
+            evidence_offset = located if located >= 0 else None
+
+            if _BACKWARD_TRIGGER.fullmatch(match.group()):
+                span = self._backward_span(text, match)
+            else:
+                span = text[match.end() : match.end() + CONCEPT_MAX_CHARS * 4]
+                span = span.split(".")[0]
+
+            for raw in _SPLIT.split(span):
+                candidate = _TRAILING.sub("", raw).strip(" \t:,–—-")
+                if not CONCEPT_MIN_CHARS <= len(candidate) <= CONCEPT_MAX_CHARS:
+                    continue
+                if candidate.lower() in seen:
+                    continue
+                seen.add(candidate.lower())
+                found.append(
+                    Proposal(
+                        value=candidate,
+                        confidence=RULE_CONFIDENCE,
+                        source=self.name,
+                        evidence=sentence[:EVIDENCE_MAX_CHARS],
+                        evidence_offset=evidence_offset,
+                    )
+                )
+        return tuple(found)
+
+    @staticmethod
+    def _backward_span(text: str, match: re.Match[str]) -> str:
+        """The text preceding a backward trigger, back to the last sentence delimiter.
+
+        Measured: "Modeller yaş, cinsiyet ve vücut kitle indeksi için
+        düzeltildi." — a bare regex cannot tell the clause's own subject
+        ("Modeller") from a list item ("vücut kitle indeksi"): both are
+        whitespace-joined words with no comma or "ve" between them, so
+        there is no delimiter-based way to draw the line.
+        `_ADJUSTMENT_SUBJECT` strips a short, closed set of known subject
+        words seen in this exact construction; sentences using a different
+        subject word will still leak it into the first candidate (not
+        measured).
+        """
+        window_start = max(
+            text.rfind(".", 0, match.start()), text.rfind("\n", 0, match.start())
+        )
+        window_start = window_start + 1 if window_start >= 0 else 0
+        span = text[window_start : match.end()]
+        return _ADJUSTMENT_SUBJECT.sub("", span, count=1)
 
     @staticmethod
     def _sentence_around(text: str, index: int) -> str:

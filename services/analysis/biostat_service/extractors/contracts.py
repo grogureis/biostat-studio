@@ -111,7 +111,15 @@ class MethodologyExtractor(Protocol):
 
 
 def column_summaries(profile: "DataProfile") -> tuple[ColumnSummary, ...]:
-    """Project a DataProfile down to what engines may see. Stable order."""
+    """Project a DataProfile down to what engines may see. Stable order.
+
+    `sorted()` is not cosmetic: dict order otherwise follows the source
+    workbook's column order, and when two match scores tie, order decides
+    the winner — so the sort is what makes the plan digest reproducible
+    regardless of how the workbook happened to lay out its columns. Dicts
+    already preserve insertion order, which is exactly why this is easy to
+    "simplify" away without noticing the guarantee it is protecting.
+    """
     return tuple(
         ColumnSummary(
             name=name,

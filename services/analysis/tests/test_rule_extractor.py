@@ -215,3 +215,44 @@ def test_detects_cross_sectional_with_en_dash() -> None:
     document = make_document("Methods\nA cross–sectional survey was conducted.")
 
     assert RuleExtractor().extract_brief(document).design.value == "cross_sectional"
+
+
+# --- Task 5: concept extraction (outcome/exposure/covariate). The rule
+# engine leaves a field empty rather than guessing, so the third test below
+# is as load-bearing as the first two: a trigger word that merely APPEARS
+# in a sentence must not be mistaken for the document declaring its own
+# variable.
+def test_extracts_a_primary_outcome_concept() -> None:
+    document = make_document(
+        "Yöntem\nBirincil sonlanım 30 günlük mortalite olarak tanımlandı."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [proposal.value for proposal in brief.outcome_concepts] == [
+        "30 günlük mortalite"
+    ]
+    assert brief.outcome_concepts[0].evidence is not None
+
+
+def test_extracts_a_covariate_list() -> None:
+    document = make_document(
+        "Yöntem\nModeller yaş, cinsiyet ve vücut kitle indeksi için düzeltildi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [proposal.value for proposal in brief.covariate_concepts] == [
+        "yaş",
+        "cinsiyet",
+        "vücut kitle indeksi",
+    ]
+
+
+def test_a_sentence_without_a_concept_pattern_yields_nothing() -> None:
+    document = make_document("Yöntem\nVeriler SPSS 26 ile analiz edildi.")
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.outcome_concepts == ()
+    assert brief.covariate_concepts == ()
