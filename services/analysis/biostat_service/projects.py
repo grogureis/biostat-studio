@@ -40,6 +40,7 @@ AUDIT_EVENT_TYPES = frozenset(
         "analysis_cancelled",
         "artifacts_generated",
         "report_exported",
+        "methodology_document_attached",
     }
 )
 AUDIT_ACTORS = frozenset({"user", "system"})

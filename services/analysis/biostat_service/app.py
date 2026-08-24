@@ -25,17 +25,25 @@ from .contracts import AnalysisPlan, StudyBrief, VariableRole
 from .data_intake import DataProfile, canonicalize_frame_columns, profile_excel
 from .extractors.contracts import EVIDENCE_MAX_CHARS, BriefProposal, Proposal
 from .extractors.rule import RuleExtractor
-from .methodology_intake import MethodologyIntakeError, extract_document
+from .methodology_intake import (
+    MAX_DOCUMENT_CHARS,
+    MethodologyDocument,
+    MethodologyIntakeError,
+    extract_document,
+)
 from .power import PowerRequest, PowerValidationError, compute_power
 from .jobs import JobManager, JobState, StagedJobResult
 from .planner import build_plan
 from .projects import (
     LocalProject,
+    MethodologyRecord,
     append_audit_event,
     atomic_file_copy,
+    attach_methodology,
     create_project,
     load_project,
     profile_from_manifest,
+    read_methodology,
     save_project_state,
 )
 from .reporting import build_results_docx
@@ -57,10 +65,20 @@ class ReadinessServer(Server):
             print(json.dumps({"port": port, "api": API_VERSION}), flush=True)
 
 
+class MethodologyPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_DOCUMENT_CHARS)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_format: str = Field(min_length=1, max_length=8)
+    original_name: str = Field(min_length=1, max_length=255)
+    char_count: int = Field(ge=0)
+    truncated: bool = False
+
+
 class ProjectRequest(BaseModel):
     source_path: str = Field(min_length=1)
     project_root: Optional[str] = None
     brief: StudyBrief
+    methodology: Optional[MethodologyPayload] = None
 
 
 class DataProfileRequest(BaseModel):
@@ -114,6 +132,7 @@ class ProjectContext:
     project: LocalProject
     profile: DataProfile
     brief: StudyBrief
+    methodology: "MethodologyRecord | None" = None
     data_structure_approved: bool = False
     approved_roles: dict[str, VariableRole] | None = None
     plan: AnalysisPlan | None = None
@@ -219,6 +238,9 @@ def _restore_context(project: LocalProject, manifest: dict[str, Any]) -> Project
         approved_roles=approved_roles,
         report_refs=[dict(value) for value in state.get("reports", [])],
     )
+    # A project reopened after a restart must still know its document —
+    # the manifest is the durable home; read it back into memory now.
+    context.methodology = read_methodology(project)
     plan_value = state.get("plan")
     if plan_value is not None:
         context.plan = AnalysisPlan.model_validate(plan_value["content"])
@@ -578,8 +600,13 @@ def create_app() -> FastAPI:
         return {
             "source_sha256": document.source_sha256,
             "source_format": document.source_format,
+            # .name only, never the full path — Path(...).name cannot return a
+            # directory component, which is how the renderer's no-path guarantee
+            # (spec §3) is upheld here.
+            "original_name": Path(request.source_path).name,
             "char_count": document.char_count,
             "truncated": document.truncated,
+            "text": document.text,
             "warnings": _merged_warnings(document.warnings, brief["warnings"]),
             "brief": brief,
         }
@@ -594,16 +621,59 @@ def create_app() -> FastAPI:
                 else profile.source_path.with_suffix(".biostat")
             )
             project = create_project(root, request.brief, profile)
+            if request.methodology is not None:
+                attach_methodology(
+                    project,
+                    MethodologyDocument(
+                        source_sha256=request.methodology.source_sha256,
+                        source_format=request.methodology.source_format,
+                        text=request.methodology.text,
+                        char_count=request.methodology.char_count,
+                        truncated=request.methodology.truncated,
+                        warnings=(),
+                    ),
+                    request.methodology.original_name,
+                )
+                append_audit_event(
+                    project, {"type": "methodology_document_attached", "actor": "user"}
+                )
             append_audit_event(project, {"type": "data_imported", "actor": "user"})
             _, manifest = load_project(project.root)
             profile = profile_from_manifest(project, manifest)
+            # None when no document was attached above; read back from the
+            # manifest rather than hand-building a MethodologyRecord so the
+            # in-memory context matches durable state the same way a reopened
+            # project's context does (_restore_context, below).
+            methodology = read_methodology(project)
         except (OSError, ValueError, RuntimeError):
             raise HTTPException(status_code=422, detail="project_creation_failed")
         project_id = UUID(manifest["project_id"])
         projects[project_id] = ProjectContext(
-            project=project, profile=profile, brief=request.brief
+            project=project, profile=profile, brief=request.brief, methodology=methodology
         )
         return {"id": str(project_id), "profile": _profile_payload(profile)}
+
+    @v1.post("/projects/{project_id}/methodology")
+    def attach_project_methodology(
+        project_id: UUID, request: MethodologyPayload
+    ) -> dict[str, bool]:
+        context = _get_context(projects, project_id)
+        with context.state_lock:
+            document = MethodologyDocument(
+                source_sha256=request.source_sha256,
+                source_format=request.source_format,
+                text=request.text,
+                char_count=request.char_count,
+                truncated=request.truncated,
+                warnings=(),
+            )
+            attach_methodology(context.project, document, request.original_name)
+            context.methodology = read_methodology(context.project)
+            append_audit_event(
+                context.project,
+                {"type": "methodology_document_attached", "actor": "user"},
+            )
+        return {"attached": True}
 
     @v1.post("/projects/open")
     def open_local_project(request: OpenProjectRequest) -> dict[str, Any]:
