@@ -1,8 +1,20 @@
 # STATE.md — biostat-studio
 
-**Son güncelleme:** 2026-08-24 · oturum `biostat-studio-app-8f`
-**Dal:** `feat/methodology-intake` · son commit `9311077`
+**Son güncelleme:** 2026-08-24 · oturum `biostat-studio-app-8c`
+**Dal:** `feat/methodology-intake` · son commit `472cb2c` · ayrım noktasından beri **19 commit**
 (`codex/biostat-studio` @ `28af9c9`'dan dallandı; birleştirilmeyi bekliyor)
+
+**Devralma doğrulaması `[ÖLÇÜM 2026-08-24, oturum 8c]`** — devir notundaki iddialar tek tek koşuldu:
+- `PYTHONPATH=services/analysis services/analysis/.venv-py312/bin/python -m pytest services/analysis/tests -q`
+  → **280 passed**. `npm run test:python` hâlâ bozuk (venv editable kablolaması), kök neden `doğrulanmadı`.
+- `npm run test:desktop` → **67 passed** (9 dosya).
+- Typecheck: kökte `typecheck` script'i **yok**; `apps/desktop`'ta var
+  (`cd apps/desktop && npx tsc --noEmit`) → **temiz**. Devir notundaki "npm run typecheck" yanıltıcı.
+- Çalışma ağacı temiz.
+- **Merge kuru testi:** `git merge-tree --write-tree codex/biostat-studio feat/methodology-intake`
+  → **exit 0, çakışma yok** (STATE.md dosyası dahil). STATE.md'nin çakışma uyarısı ölçümle düştü.
+- **Ayrışma:** `origin/codex/biostat-studio` 2 commit ileri (docs-only `6fab78e`, `639e7aa`),
+  yerel `codex/biostat-studio` **3** commit ileri. (Bu dosya daha önce "1" diyordu — bayattı.)
 
 > ⚠️ Bu dosya ilk kez 2026-08-24'te oluşturuldu. Öncesindeki geçmiş burada değil;
 > `docs/superpowers/plans/`, `docs/validation/` ve git log'a bakın.
@@ -76,6 +88,45 @@ testler yeşilken görünmüyordu):
   Sonucu iki katmanda kapsanıyor (`path-capabilities.test.ts`, `api-proxy.test.ts`).
 - `methodology_intake.py` FIX 5 sonrası: metin boş **ve** hash okunamıyorsa hata kodu
   `no_extractable_text` yerine `unreadable_document` oluyor. Güvenli, testsiz, TOCTOU-nadir.
+
+### 0d. Plan 2'yi bloke eden tek mimari karar — **Erdem'in kararı, verilmedi**
+`[ÖLÇÜM 2026-08-24, oturum 8c — kod okundu]`
+
+Madde 0b "Plan 2 doküman metnine dönüş yolunu kendisi kurmak zorunda" diyordu. O yolun
+üç seçeneği var ve seçim Plan 2'nin görev sırasını belirliyor, dolayısıyla plan yazılmadan
+önce verilmeli. Ölçülen kısıtlar:
+
+- `client.ts:190` — `methodologyCapability = null` **gönderimden önce** çalışıyor. Token
+  tek kullanımlık; başarısız istek bile token'ı öldürüyor (kodun kendi yorumu bunu söylüyor).
+- `app.py:70` `MethodologyExtractRequest` yalnızca `source_path` taşıyor. Extract, `study`
+  adımında, **proje daha yaratılmadan** çağrılıyor → sunucuda saklamanın asılacağı bir
+  `ProjectContext` yok. Global bir sözlük demek: TTL/evict gerektiren proje-dışı durum.
+  0b'deki ret gerekçesi bu ölçümle **hâlâ geçerli**.
+- `StudyBrief.tsx:117` — `extraction` bileşenin **yerel** state'inde; App'e hiç çıkmıyor,
+  dolayısıyla `DataIntake` onu göremiyor. Eşleştirme adımına taşınması için bir yol gerek.
+
+**Yollar:**
+(a) **Sunucuda sakla** (spec §4 Karar B'nin özgün hali) — proje-dışı global durum + evict.
+(b) **İkinci capability token** (Excel deseni, `main.ts:69-70`) — dosya ikinci kez okunur;
+    araya kullanıcı adımı girdiği için hash değişmiş olabilir, yeni bir hata yolu doğar.
+(c) **Seçilmiş metni yanıtta döndür**, renderer taşısın, eşleştirmede geri göndersin —
+    `select_relevant_text` zaten 12.000 karaktere kırpıyor (`rule.py:19 SELECTION_BUDGET`).
+    Sunucu durumsuz kalır, yeni token yok, dosya ikinci kez okunmaz.
+
+**8c'nin tavsiyesi: (c).** Gerekçe: üçü arasında **yeni durum yaratmayan tek yol**. Metin
+zaten `evidence` alanlarıyla parça parça renderer'a iniyor; gizlilik sınırı hasta verisinde
+ve o sınır `ColumnSummary`'de hücre değeri olmamasıyla korunuyor — metodoloji metni o
+sınırın içinde değil. **Karar verilmedi.**
+
+### 0e. Plan 2'nin işini kolaylaştıran iki hazır altyapı `[ÖLÇÜM 2026-08-24, oturum 8c]`
+Plan 2 sıfırdan kurmayacak; ikisi de çalışır durumda:
+- `app.py:386 _validated_roles` **zaten** `not role.confirmed` görünce 422
+  `unconfirmed_variable_roles` atıyor. **Sunucu kapısı var.** Bulgu A-1 bir sözleşme açığı
+  değil, yalnızca `DataIntake.tsx:81`'in her rolü `confirmed: true` damgalamasıyla UI'da
+  atlanan bir kapı. Düzeltme tek katmanda.
+- `app.py:427 _apply_approved_kinds` onaylanan `kind`'ı okunan frame'e gerçekten uyguluyor
+  (`continuous` → `to_numeric`, `binary`/`categorical` → `string`). Bulgu A-2'yi kapatmak
+  için **yeni dönüşüm kodu gerekmiyor**; eksik olan doküman düzeltmesi ve insan kapısı.
 
 ### 0c. Yerel LLM — ÖN ÖLÇÜM YAPILDI (2026-08-24), Plan 3 kararı bekliyor
 **Durum:** Ollama'da model yoktu, hiçbir şey ölçülmemişti. Artık ölçüldü.
@@ -215,6 +266,9 @@ girişine yeni bir adım ekliyor. Kabul testi zaten bir kez importta patlamışt
 değişken eşleştirme + çelişki çözümü + `confirmed` bayrağının düzeltilmesi.
 **Başlamadan önce madde 0b'yi okuyun** — özellikle spec §4 Karar B'nin dayanaksız kalmış
 gerekçesini; Plan 2 doküman metnine geri dönüş yolunu kendisi kurmak zorunda.
+**BLOKE:** madde **0d** — metne dönüş yolu (a/b/c) seçilmeden plan yazılmaya başlanmadı;
+görev sırası bu seçime bağlı. 8c'nin tavsiyesi (c). Ayrıca madde **0e**: `_validated_roles`
+ve `_apply_approved_kinds` hazır, Plan 2 onların üstüne kurulmalı — yeniden yazmamalı.
 
 **3. Plan 3'ü yaz** (spec §7-§8): blocking sözlüğü + gold set + ölçüm + `LocalExtractor`.
 Motor seçimi **ölçümsüz yapılmayacak**. Ollama kurulu ve ayakta, **yüklü model yok**
