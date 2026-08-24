@@ -1,6 +1,6 @@
 import { AnalysisApiError, type AnalysisApi } from "../../api/client";
 import type { MethodologyExtraction, StudyBrief as StudyBriefDto, StudyDesign } from "../../api/types";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 interface StudyBriefProps {
   value: StudyBriefDto;
@@ -40,6 +40,7 @@ const text = {
     listHelp: "Use commas to separate variable names.",
     note: "The analysis plan will use the confirmed design and variable roles. Automated guidance supports, but does not replace, qualified statistical review.",
     upload: "Import methodology document",
+    importing: "Importing document…",
     uploadHelp: "Word, PDF, text or markdown. Fields below are filled as suggestions you can change.",
     proposed: "from document",
     truncated: "The document was long, so only its first part was read.",
@@ -68,6 +69,7 @@ const text = {
     listHelp: "Değişken adlarını virgülle ayırın.",
     note: "Analiz planı onaylanmış tasarım ve değişken rollerini kullanır. Otomatik rehberlik, yetkin istatistik incelemesini destekler ancak onun yerine geçmez.",
     upload: "Metodoloji dokümanı yükle",
+    importing: "Doküman yükleniyor…",
     uploadHelp: "Word, PDF, metin veya markdown. Aşağıdaki alanlar öneri olarak doldurulur, değiştirebilirsiniz.",
     proposed: "dokümandan",
     truncated: "Doküman uzun olduğu için yalnızca ilk kısmı okundu.",
@@ -99,16 +101,33 @@ function parseList(value: string): string[] {
 
 export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) {
   const copy = text[language];
+
+  // `update` must write against the CURRENT brief, not the one captured when
+  // this render ran. importDocument calls update("design", …) after awaiting
+  // extractMethodology, and App.tsx hands the result to store.ts, which
+  // replaces the whole brief object with no merge — so a stale closure here
+  // silently reverted every field that changed during the round trip.
+  const latest = useRef(value);
+  latest.current = value;
   const update = <Key extends keyof StudyBriefDto>(key: Key, next: StudyBriefDto[Key]) => {
-    onChange({ ...value, [key]: next });
+    onChange({ ...latest.current, [key]: next });
   };
 
   const [documentName, setDocumentName] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<MethodologyExtraction | null>(null);
   const [failure, setFailure] = useState<KnownErrorCode | null>(null);
+  const [busy, setBusy] = useState(false);
+  // The file dialog is modal but the extraction that follows it is not, so the
+  // form stayed fully interactive with no spinner. A ref, not the `busy` state,
+  // is the in-flight guard: two clicks in one tick both read the same batched
+  // state value, while a ref is updated synchronously.
+  const running = useRef(false);
 
   const importDocument = async () => {
     if (!api?.selectMethodologyDocument || !api.extractMethodology) return;
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
     setFailure(null);
     try {
       const name = await api.selectMethodologyDocument();
@@ -127,6 +146,9 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
       setFailure(toKnownErrorCode(error));
       setDocumentName(null);
       setExtraction(null);
+    } finally {
+      running.current = false;
+      setBusy(false);
     }
   };
 
@@ -150,9 +172,10 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
           type="button"
           className="primary-action"
           aria-describedby="methodology-upload-help"
+          disabled={busy}
           onClick={() => void importDocument()}
         >
-          {copy.upload}
+          {busy ? copy.importing : copy.upload}
         </button>
       </div>
       {failure ? (
@@ -168,6 +191,7 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
           <input
             id="project-title"
             value={value.title}
+            disabled={busy}
             onChange={(event) => update("title", event.target.value)}
             placeholder={copy.projectPlaceholder}
           />
@@ -178,6 +202,7 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
             id="research-question"
             required
             rows={3}
+            disabled={busy}
             value={value.question}
             onChange={(event) => update("question", event.target.value)}
             placeholder={copy.questionPlaceholder}
@@ -189,6 +214,7 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
             id="hypothesis"
             required
             rows={3}
+            disabled={busy}
             value={value.hypothesis}
             onChange={(event) => update("hypothesis", event.target.value)}
             placeholder={copy.hypothesisPlaceholder}
@@ -203,7 +229,7 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
               </span>
             ) : null}
           </label>
-          <select id="study-design" value={value.design} onChange={(event) => update("design", event.target.value as StudyDesign)}>
+          <select id="study-design" value={value.design} disabled={busy} onChange={(event) => update("design", event.target.value as StudyDesign)}>
             {designs.map((design) => <option key={design.value} value={design.value}>{design[language]}</option>)}
           </select>
           {extraction?.brief.design?.evidence ? (
@@ -212,15 +238,15 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
         </div>
         <div className="field">
           <label htmlFor="outcomes">{copy.outcomes}</label>
-          <input id="outcomes" value={listValue(value.outcome_variables)} onChange={(event) => update("outcome_variables", parseList(event.target.value))} aria-describedby="variable-list-help" />
+          <input id="outcomes" value={listValue(value.outcome_variables)} disabled={busy} onChange={(event) => update("outcome_variables", parseList(event.target.value))} aria-describedby="variable-list-help" />
         </div>
         <div className="field">
           <label htmlFor="exposures">{copy.exposures}</label>
-          <input id="exposures" value={listValue(value.exposure_variables)} onChange={(event) => update("exposure_variables", parseList(event.target.value))} aria-describedby="variable-list-help" />
+          <input id="exposures" value={listValue(value.exposure_variables)} disabled={busy} onChange={(event) => update("exposure_variables", parseList(event.target.value))} aria-describedby="variable-list-help" />
         </div>
         <div className="field">
           <label htmlFor="covariates">{copy.covariates}</label>
-          <input id="covariates" value={listValue(value.covariates)} onChange={(event) => update("covariates", parseList(event.target.value))} aria-describedby="variable-list-help" />
+          <input id="covariates" value={listValue(value.covariates)} disabled={busy} onChange={(event) => update("covariates", parseList(event.target.value))} aria-describedby="variable-list-help" />
         </div>
         <p id="variable-list-help" className="form-help field-wide">{copy.listHelp}</p>
       </form>

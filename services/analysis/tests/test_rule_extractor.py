@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from biostat_service.extractors.contracts import BriefProposal, Proposal
 from biostat_service.extractors.rule import RuleExtractor
 from biostat_service.methodology_intake import MethodologyDocument
 
@@ -56,6 +55,62 @@ def test_detects_repeated_measures() -> None:
     document = make_document("Yöntem\nTekrarlı ölçümler ile değerlendirildi.")
 
     assert RuleExtractor().extract_brief(document).design.value == "repeated"
+
+
+def test_detects_repeated_measures_in_english() -> None:
+    document = make_document("Methods\nA repeated measures ANOVA was used.")
+
+    assert RuleExtractor().extract_brief(document).design.value == "repeated"
+
+
+# --- FINAL REVIEW: "longitudinal follow-up" is a follow-up SCHEDULE, not a
+# design. It was an alternative of the `repeated` pattern, and `repeated` is
+# tried before `cohort`, so the single most common observational phrasing —
+# "retrospective cohort study with longitudinal follow-up" — classified as
+# `repeated`. The consequence is not cosmetic: planner.py branches on
+# design == "repeated" into within-subject paired analysis and raises
+# unsupported_repeated_design when no pair-id variable exists. The evidence
+# sentence returned alongside the answer literally contains "cohort study",
+# so the UI rendered a proposal badge whose own quote disproved it.
+def test_english_retrospective_cohort_with_longitudinal_follow_up_is_cohort() -> None:
+    document = make_document(
+        "Methods\nWe conducted a retrospective cohort study with longitudinal follow-up of 24 months."
+    )
+
+    design = RuleExtractor().extract_brief(document).design
+
+    assert design is not None
+    assert design.value == "cohort"
+    assert "cohort study" in design.evidence.lower()
+
+
+def test_english_prospective_cohort_with_longitudinal_followup_is_cohort() -> None:
+    document = make_document(
+        "Methods\nA prospective cohort study with longitudinal followup was performed."
+    )
+
+    assert RuleExtractor().extract_brief(document).design.value == "cohort"
+
+
+def test_turkish_cohort_with_longitudinal_follow_up_is_cohort() -> None:
+    document = make_document(
+        "Yöntem\nRetrospektif kohort çalışması, 24 aylık longitudinal follow-up ile yürütüldü."
+    )
+
+    assert RuleExtractor().extract_brief(document).design.value == "cohort"
+
+
+def test_longitudinal_follow_up_alone_is_not_a_design() -> None:
+    """Reordering the patterns would not have been enough.
+
+    With `cohort` merely moved ahead of `repeated`, a sentence carrying the
+    follow-up schedule and no design word at all would still come out
+    `repeated`. A follow-up schedule is not evidence of a within-subject
+    design, so the correct answer is no proposal rather than a wrong one.
+    """
+    document = make_document("Methods\nLongitudinal follow-up was performed.")
+
+    assert RuleExtractor().extract_brief(document).design is None
 
 
 def test_leaves_design_empty_when_nothing_matches() -> None:

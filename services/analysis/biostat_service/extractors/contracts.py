@@ -16,13 +16,24 @@ EVIDENCE_MAX_CHARS = 400
 
 @dataclass(frozen=True)
 class Proposal:
-    """One machine-suggested value, always carrying its own evidence."""
+    """One machine-suggested value, always carrying its own evidence.
+
+    `source` is REQUIRED and deliberately has no default. It is the provenance
+    field, and spec §7 makes provenance a shipped promise. A default naming a
+    concrete engine ("rule") makes silence indistinguishable from a positive
+    claim of rule-engine origin — the one field where a wrong default is a
+    false attestation rather than a merely missing value. Proposal is the
+    shared multi-engine contract, and a contract's defaults are what future
+    engines inherit: a language-model engine that forgets to pass `source` now
+    gets a TypeError at construction instead of silently mislabelling its own
+    output as deterministic rule output.
+    """
 
     value: str
     confidence: float
+    source: str
     evidence: str | None = None
     evidence_offset: int | None = None
-    source: str = "rule"
 
 
 @dataclass(frozen=True)

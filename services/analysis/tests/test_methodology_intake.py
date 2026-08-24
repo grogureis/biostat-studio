@@ -10,7 +10,6 @@ import pytest
 
 from biostat_service.methodology_intake import (
     MAX_DOCUMENT_CHARS,
-    MethodologyDocument,
     MethodologyIntakeError,
     extract_document,
     select_relevant_text,

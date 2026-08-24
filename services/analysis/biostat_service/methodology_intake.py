@@ -63,6 +63,12 @@ def extract_document(path: Path) -> MethodologyDocument:
     if size > MAX_DOCUMENT_BYTES:
         raise MethodologyIntakeError("file_too_large")
 
+    # sha256_file reads the file too, so it is a reader failure like any other
+    # and belongs INSIDE this guard. Left outside, a PermissionError from it
+    # escapes extract_document unsuppressed — and its str() carries the full
+    # filesystem path. Nothing leaks to a response today because app.py has a
+    # blanket handler, but that is one layer, and this module deliberately
+    # insists on two everywhere else.
     try:
         if source_format == "docx":
             raw = _read_docx(path)
@@ -70,6 +76,7 @@ def extract_document(path: Path) -> MethodologyDocument:
             raw = _read_pdf(path)
         else:
             raw = _read_plain(path)
+        source_sha256 = sha256_file(path)
     except MethodologyIntakeError:
         raise
     except Exception:  # noqa: BLE001 - any reader failure is one stable code
@@ -86,7 +93,7 @@ def extract_document(path: Path) -> MethodologyDocument:
         warnings.append("document_truncated")
 
     return MethodologyDocument(
-        source_sha256=sha256_file(path),
+        source_sha256=source_sha256,
         source_format=source_format,
         text=text,
         char_count=len(text),

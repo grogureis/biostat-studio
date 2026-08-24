@@ -163,6 +163,7 @@ def test_proposal_serializer_clips_over_long_evidence_on_its_own() -> None:
     proposal = Proposal(
         value="cohort",
         confidence=0.7,
+        source="rule",
         evidence="hasta-001 " * ((EVIDENCE_MAX_CHARS // 10) + 20),
         evidence_offset=0,
     )

@@ -20,13 +20,34 @@ SELECTION_BUDGET = 12_000
 
 # Tasarım sözlüğü. Sıra ÖNEMLİ: daha özgül kalıplar önce denenir, çünkü
 # "randomize kontrollü çalışma" hem trial hem cohort kelimesi taşıyabilir.
+#
+# `repeated` yalnızca tasarımı KESİN olarak söyleyen ifadeleri taşır. Buradan
+# "longitudinal follow-?up" çıkarıldı: o bir izlem TAKVİMİdir, tasarım değil.
+# "Retrospective cohort study with longitudinal follow-up" gözlemsel klinik
+# metodolojinin en yaygın cümlesidir ve `repeated` `cohort`tan önce denendiği
+# için `repeated` dönüyordu; üstelik yanıtla birlikte gösterilen evidence
+# cümlesi "cohort study" yazıyordu. Sadece sırayı değiştirmek yetmezdi:
+# tasarım kelimesi geçmeyen "Longitudinal follow-up was performed." yine
+# `repeated` olurdu. Sonuç kozmetik değil — planner.py design == "repeated"
+# üzerinden denek-içi eşleştirilmiş analize dallanıyor.
 DESIGN_PATTERNS: tuple[tuple[str, str], ...] = (
     ("case_control", r"olgu[\s-]*kontrol|vaka[\s-]*kontrol|case[\s-]*control"),
     ("trial", r"randomize|randomised|randomized|klinik araştırma|controlled trial"),
-    ("repeated", r"tekrarl[ıi] ölçüm|tekrarlayan ölçüm|repeated measures|longitudinal follow-?up"),
+    ("repeated", r"tekrarl[ıi] ölçüm|tekrarlayan ölçüm|repeated measures"),
     ("cohort", r"kohort|cohort"),
     ("cross_sectional", r"kesitsel|cross[\s-]*sectional"),
 )
+
+# Sabit bir sentinel: "bir kalıp eşleşti ama bağlamı doğrulayamadım" demektir.
+# KALİBRE EDİLMİŞ BİR OLASILIK DEĞİLDİR. Her kural önerisi, eşleşmenin
+# kalitesinden bağımsız olarak aynı değeri alır — tek kelimelik zayıf bir
+# eşleşme de, cümlenin tamamını doğrulayan güçlü bir eşleşme de 0.7 döner.
+# Bu sayı renderer'a `confidence` olarak serileştiriliyor ve spec §6/§11 toplu
+# kabul (bulk-accept) eşiğini tam da buna karşı planlıyor. Gold-set ölçümü
+# yapılmadan bu değer bir eşik girdisi olarak KULLANILMAMALIDIR: kalibre
+# edilmemiş bir sabite karşı kurulan eşik, iş yapıyormuş gibi görünüp hiçbir
+# şey elemeyen bir güvenlik kapısıdır.
+RULE_CONFIDENCE = 0.7
 
 
 class RuleExtractor:
@@ -63,7 +84,7 @@ class RuleExtractor:
             evidence_offset = found if found >= 0 else None
             return Proposal(
                 value=design,
-                confidence=0.7,
+                confidence=RULE_CONFIDENCE,
                 evidence=evidence,
                 evidence_offset=evidence_offset,
                 source=self.name,
