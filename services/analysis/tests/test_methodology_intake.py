@@ -119,3 +119,29 @@ def test_formatted_traceback_never_contains_the_file_path(tmp_path: Path) -> Non
 
     assert "secret-patient-study" not in rendered
     assert str(tmp_path) not in rendered
+
+
+def write_pdf(path: Path) -> Path:
+    """Minimal single-page PDF with no text layer (a stand-in for a scanned PDF)."""
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    with path.open("wb") as handle:
+        writer.write(handle)
+    return path
+
+
+def test_pdf_without_text_layer_is_rejected_as_scanned(tmp_path: Path) -> None:
+    path = write_pdf(tmp_path / "scan.pdf")
+
+    with pytest.raises(MethodologyIntakeError) as excinfo:
+        extract_document(path)
+
+    assert str(excinfo.value) == "no_extractable_text"
+
+
+def test_pdf_is_a_supported_format(tmp_path: Path) -> None:
+    from biostat_service.methodology_intake import SUPPORTED_FORMATS
+
+    assert "pdf" in SUPPORTED_FORMATS

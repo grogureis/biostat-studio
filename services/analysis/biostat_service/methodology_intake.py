@@ -13,7 +13,7 @@ from biostat_service.data_intake import sha256_file
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
 MAX_DOCUMENT_CHARS = 200_000
 
-SUPPORTED_FORMATS = frozenset({"docx", "txt", "md"})
+SUPPORTED_FORMATS = frozenset({"docx", "pdf", "txt", "md"})
 
 
 class MethodologyIntakeError(ValueError):
@@ -46,6 +46,13 @@ def _read_plain(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _read_pdf(path: Path) -> str:
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
 def extract_document(path: Path) -> MethodologyDocument:
     source_format = _source_format(path)
 
@@ -57,7 +64,12 @@ def extract_document(path: Path) -> MethodologyDocument:
         raise MethodologyIntakeError("file_too_large")
 
     try:
-        raw = _read_docx(path) if source_format == "docx" else _read_plain(path)
+        if source_format == "docx":
+            raw = _read_docx(path)
+        elif source_format == "pdf":
+            raw = _read_pdf(path)
+        else:
+            raw = _read_plain(path)
     except MethodologyIntakeError:
         raise
     except Exception:  # noqa: BLE001 - any reader failure is one stable code
