@@ -355,15 +355,27 @@ raporlandı, `8f` tarafından git ile doğrulanıp yazıldı. 1b Task 8'i uygula
 
 ## Sıradaki iş
 
-**1. `feat/methodology-intake` dalının birleştirme kararı — Erdem'in kararı, verilmedi.**
-Kod hazır, inceleme temiz (344 test, typecheck temiz, çalışma ağacı temiz).
-Sıralama önerisi: **önce Task 8'in operatör kabul testi** (madde 4) koşulsun, sonra bu dal
-birleşsin. Gerekçe: kabul testi gerçek bir `.xlsx` ile uçtan uca akışı sınıyor; bu dal o akışın
-girişine yeni bir adım ekliyor. Kabul testi zaten bir kez importta patlamıştı (`01ad68a`).
+**1. ⏸️ MOLA VERİLDİ — Plan 2 çalıştırması yarıda, Task 2'nin incelemesi bekliyor.**
+2026-08-24 ~22:10, Erdem 30 dakikalık mola istedi. **Dönüşte "devam" demesi yeterli.**
 
-**2. Plan 2'yi ÇALIŞTIR** — plan yazıldı (madde 1), kodlanmadı. Erdem'in vermediği tek karar:
-**subagent-driven mı, inline mı?** Plan 1'in ölçülmüş dersi (aşağıdaki kişisel not) subagent
-+ **zorunlu final dal incelemesi** diyor; sekiz task incelemesi iki kusuru kaçırmıştı.
+Dal: `feat/methodology-matching` (worktree `.worktrees/methodology-intake`; worktree adı eski
+dalın adını taşıyor, **dal adına bakın**). Base `1be5ebe`.
+Yöntem: subagent-driven, her task'tan sonra inceleme, sonda tam dal incelemesi (Erdem'in kararı).
+Ledger — **tek doğru kaynak**: `.superpowers/sdd/2026-08-24-metodoloji-eslestirme-plan2/progress.md`
+(git-ignored; `git clean -fdx` onu siler, o zaman `git log`'dan kurtarın).
+
+| Task | Durum |
+|---|---|
+| 1 — Belgenin evi (`projects.py`) | ✅ complete (`1be5ebe..268f3ca`), inceleme temiz, 1 fix turu |
+| 2 — Servis yüzeyi (`app.py`) | 🔶 kodlandı (`73ec559`, 284 passed) — **incelemesi gönderilmedi** |
+| 3-10 | başlanmadı, briefleri hazır |
+
+**Dönüşte ilk komut:** `scripts/review-package <plan> 268f3ca 73ec559` → task reviewer dispatch.
+İncelemeye taşınacak üç açık madde ledger'da yazılı; **en kritiği:** implementer iki mevcut
+testin assertion'larını daralttı (yanıta `text`/`original_name` eklendiği için kırılmışlardı) ve
+"güvenlik amacını koruyarak daralttım" diyor — **bu iddia bağımsız doğrulanmalı.**
+
+**2. Merge sonrası hâlâ açık:** operatör GUI kabul testi (madde 4/3) koşulmadı.
 
 **3. Plan 3'ü yaz** (spec §7-§8): blocking sözlüğü + gold set + ölçüm + `LocalExtractor`.
 Motor seçimi **ölçümsüz yapılmayacak**. Ollama kurulu ve ayakta, **yüklü model yok**
