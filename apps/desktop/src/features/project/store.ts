@@ -80,6 +80,17 @@ function reducer(state: ProjectState, action: Action): ProjectState {
       plan: action.value.plan,
       planApproved: action.value.approved_plan,
       results: action.value.results,
+      // Forward-looking hygiene, not a fix for a live bug: today the only
+      // reader of `methodology` is approveData() in App.tsx, which always
+      // creates a brand-new project, and reaching it again after a restore
+      // needs dataApproved: false, which the normal flow never produces.
+      // But OpenProjectSnapshot carries no methodology field, so a document
+      // extracted-but-not-yet-attached in an interrupted or crashed session
+      // would otherwise survive a restore unattached to any project. Nulling
+      // it here also means the leak stays closed the moment
+      // attachMethodology (added in this task, not yet wired to any UI
+      // trigger) gains a caller.
+      methodology: null,
     };
   }
 }
