@@ -129,14 +129,21 @@ STOP_HEADINGS = (
 )
 
 
-# Length-preserving Turkish casefold. str.lower() is locale-independent and
-# maps U+0130 (İ) to TWO code points ("i" + COMBINING DOT ABOVE), which both
-# (a) fails to match the ASCII-i heading literals below and (b) changes the
-# string length, corrupting every match offset computed against `lowered`
-# once it is used to slice the original (unfolded) `text`. Folding İ -> i and
-# I -> ı first, one character for one character, keeps positions aligned;
-# .lower() on the result then behaves normally for the remaining letters.
-_TURKISH_FOLD = str.maketrans({"İ": "i", "I": "ı"})
+# Length-preserving casefolds. str.lower() is locale-independent and maps
+# U+0130 (İ) to TWO code points ("i" + COMBINING DOT ABOVE), which both
+# (a) fails to match the heading literals below and (b) changes the string
+# length, corrupting every match offset computed against `lowered` once it
+# is used to slice the original (unfolded) `text`. Folding İ -> i first, one
+# character for one character, keeps positions aligned.
+#
+# ASCII capital "I" cannot be folded one way for both languages: Turkish
+# spells the uppercase of dotless "ı" as ASCII "I" (so "TARTIŞMA" needs
+# I -> ı to become "tartışma" and match), but English needs "I" -> "i" (so
+# "MATERIALS AND METHODS" matches "materials and methods"). One global
+# mapping breaks one language or the other, so both folds are tried and the
+# match positions are unioned (see _heading_positions_union).
+_FOLD_TR = str.maketrans({"İ": "i", "I": "ı"})  # Turkish: capital I is dotless ı
+_FOLD_EN = str.maketrans({"İ": "i"})  # ASCII: capital I lowercases to i
 
 
 def _heading_positions(lowered: str, headings: tuple[str, ...]) -> list[int]:
@@ -144,6 +151,22 @@ def _heading_positions(lowered: str, headings: tuple[str, ...]) -> list[int]:
     for heading in headings:
         for match in re.finditer(rf"^\s*{re.escape(heading)}\b.*$", lowered, re.MULTILINE):
             positions.append(match.start())
+    return positions
+
+
+def _heading_positions_union(
+    lowered_tr: str, lowered_en: str, headings: tuple[str, ...]
+) -> list[int]:
+    """Match positions found under either casefold, deduplicated and sorted.
+
+    The same heading can match at the same offset under both folds (any
+    heading with no I/İ in it, and every character before it, folds
+    identically both ways). Deduplicating before interval merging matters:
+    re-emitting the same position would reintroduce the duplicate-chunk bug
+    (Bug A) that interval merging was built to fix.
+    """
+    positions = set(_heading_positions(lowered_tr, headings))
+    positions.update(_heading_positions(lowered_en, headings))
     return sorted(positions)
 
 
@@ -175,20 +198,21 @@ def select_relevant_text(text: str, budget: int) -> tuple[str, tuple[str, ...]]:
     """
     budget = max(0, budget)
 
-    lowered = text.translate(_TURKISH_FOLD).lower()
-    if len(lowered) != len(text):
+    lowered_tr = text.translate(_FOLD_TR).lower()
+    lowered_en = text.translate(_FOLD_EN).lower()
+    if len(lowered_tr) != len(text) or len(lowered_en) != len(text):
         # Defensive guard: if some future input still changes length under
-        # folding, match offsets against `lowered` cannot be trusted to
-        # index into `text`. Fail closed to the prefix fallback rather than
-        # silently return a corrupted slice.
+        # either fold, match offsets against that folded string cannot be
+        # trusted to index into `text`. Fail closed to the prefix fallback
+        # rather than silently return a corrupted slice.
         return text[:budget], ("no_method_section",)
 
-    starts = _heading_positions(lowered, SECTION_HEADINGS)
+    starts = _heading_positions_union(lowered_tr, lowered_en, SECTION_HEADINGS)
 
     if not starts:
         return text[:budget], ("no_method_section",)
 
-    stops = _heading_positions(lowered, STOP_HEADINGS)
+    stops = _heading_positions_union(lowered_tr, lowered_en, STOP_HEADINGS)
     intervals: list[tuple[int, int]] = []
     for start in starts:
         following = [stop for stop in stops if stop > start]

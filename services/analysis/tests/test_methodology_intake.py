@@ -315,3 +315,62 @@ def test_matches_plural_gerec_ve_yontemler_heading() -> None:
 
     assert "Retrospektif kohort tasarımı" in selected
     assert warnings == ()
+
+
+def test_matches_all_caps_english_heading() -> None:
+    """Round-2 regression: the round-1 Turkish fold (I -> dotless ı) maps
+    ASCII "MATERIALS AND METHODS" to "materıals and methods", which no
+    longer matches the literal "materials and methods". ALL-CAPS headings
+    are the most common shape PDF text extraction produces."""
+    text = (
+        "MATERIALS AND METHODS\n"
+        "A retrospective cohort design was used.\n"
+        "RESULTS\n"
+        "Irrelevant results.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert "A retrospective cohort design was used." in selected
+    assert warnings == ()
+
+
+def test_all_caps_turkish_stop_heading_still_excludes_discussion() -> None:
+    """Guards against the naive fix (dropping I -> ı entirely): "TARTIŞMA"
+    contains ASCII "I" as the capital of dotless "ı". Under an ASCII-only
+    fold it would lower to "tartişma" (dotted i), which does not match the
+    literal "tartışma" stop heading, so the discussion text would leak in.
+    The Turkish fold must still be tried so this stop heading keeps working."""
+    text = (
+        "YÖNTEM\n"
+        "Retrospektif kohort tasarımı kullanıldı.\n"
+        "TARTIŞMA\n"
+        "Tartışma metni burada.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert "Retrospektif kohort tasarımı kullanıldı." in selected
+    assert "Tartışma metni burada." not in selected
+    assert warnings == ()
+
+
+def test_union_of_both_folds_does_not_double_count_overlapping_sections() -> None:
+    """Re-asserts the round-1 duplicate-chunk fix (Bug A) holds once heading
+    positions are the UNION of the Turkish and ASCII folds: the same heading
+    can match at the same offset under both folds, and that must not be
+    emitted twice or the Methods -> Statistical analysis -> Results shape
+    duplicates the statistical-analysis text again."""
+    text = (
+        "Materials and Methods\n"
+        "Patients were enrolled prospectively.\n"
+        "Statistical analysis\n"
+        "Chi-square test was used for categorical variables.\n"
+        "Results\n"
+        "Irrelevant results text.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert selected.count("Chi-square test was used") == 1
+    assert warnings == ()
