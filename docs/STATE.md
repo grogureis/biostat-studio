@@ -77,6 +77,49 @@ testler yeşilken görünmüyordu):
 - `methodology_intake.py` FIX 5 sonrası: metin boş **ve** hash okunamıyorsa hata kodu
   `no_extractable_text` yerine `unreadable_document` oluyor. Güvenli, testsiz, TOCTOU-nadir.
 
+### 0c. Yerel LLM — ÖN ÖLÇÜM YAPILDI (2026-08-24), Plan 3 kararı bekliyor
+**Durum:** Ollama'da model yoktu, hiçbir şey ölçülmemişti. Artık ölçüldü.
+Ölçüm düzeneği depoda: `scripts/eval/` (`gold_set.json`, `run_eval.py`, `--fetch`).
+Korpus metinleri **commit edilmedi** (PMC açık erişim yeniden dağıtımı belirsiz); kimlikler,
+altın etiketler ve çekme betiği commit edildi.
+
+**Kurulu modeller:** `qwen2.5:14b` (9.0 GB), `qwen2.5:7b` (~4.7 GB). Ollama ayakta.
+**Erdem'in tercihi:** *"daha iyi model sistemde olsun"* → varsayılan **14b**.
+Ölçüm bunu çürütmüyor, yalnızca "7b de yeterdi" diyor — ayırt edici fark yok, seçim tercihte kalıyor.
+**Tavan:** 24 GB RAM. `32b` Q4 ~20 GB; Electron + Python + pandas ile aynı anda çok dar. `doğrulanmadı`
+
+**ÖLÇÜLEN — dört bulgu:**
+1. **Yerel rota uygulanabilir.** Tasarım sınıflandırmasında 7b ve 14b doğru ve hızlı
+   (model yüklendikten sonra saniye altı).
+2. **Ama bu görev üç motoru AYIRT ETMİYOR.** Kural motoru, 7b ve 14b aynı skoru alıyor.
+   **Kararı verecek görev bu değil** — asıl ayırt edici, kural motorunun neredeyse hiç
+   yapamadığı **kavram çıkarımı** (sonuç/maruziyet/kovaryat). O **hiç ölçülmedi.**
+3. **Kural motorunun iki gerçek kusuru** yalnızca gerçek dergi metnine karşı koşulduğu için
+   bulundu (uydurma cümlelerle görünmüyordu): dergiler `case–control`'ü **en dash** ile yazıyor,
+   desen kaçırıyordu; ve 2500 karakter sonra geçen bir **alıntı**, makalenin kendi tasarım
+   beyanını yeniyordu. İkisi de `042a322` ile düzeltildi (280 test).
+4. **Türkçe sözlük eksik:** `"rastgele ... ayrıldı"` Türkçe'de randomizasyonun standart
+   ifadesi ve hiçbir desen eşleşmiyor. **Düzeltilmedi.**
+
+**AÇIK ÜRÜN SORUSU — cevaplanmadı, Erdem'in kararı:**
+Gerçek Türkçe Methods bölümlerinin **yarısı tasarımını hiç adlandırmıyor** ("Bu retrospektif,
+tek merkezli, gözlemsel çalışma..."). Doğru cevap nedir?
+(a) `cohort` — epidemiyolojik konvansiyon: ardışık hastaların sonuç için izlenmesi retrospektif
+kohorttur. (b) `None` — spec'in "emin olmadığı yeri boş bırakır, uydurmaz" kuralı.
+Bu karar gold set'in ne ölçtüğünü belirler; verilmeden gerçek set kurulamaz.
+
+**KRİTİK UYARI — ölçümü geçersiz kılan tuzak:**
+Aynı PMC kimlikleri, iki farklı "Methods bölümünü çıkar" kuralıyla **farklı skorlar** veriyor
+(ilk probe "ilk >400 karakter" → 9/9; depodaki koşucu "en uzun bölüm" → 7/9). Spec §5 bunu
+bölüm bulucu için uyarmıştı; aynı tuzak **korpus kurucu** için de geçerli ve ona düştük.
+**Gerçek gold set kurulmadan önce korpus çıkarma kuralı sabitlenmeli**; değiştiği anda eski
+sayıların hepsi geçersizdir. İki mevcut ölçüm **karşılaştırılamaz.**
+
+**Sıradaki ölçüm (Plan 3'ün ilk işi):** kavram çıkarımı — sonuç/maruziyet/kovaryat.
+Aday korpus zaten seçildi ve nitelik kapısından geçti (>2500 karakter, eksiksiz Methods),
+`gold_set.json` → `sonraki_korpus_adaylari`. **Etiketlenmedi.** İçinde 3 adet `repeated`
+örneği var — mevcut sette hiç yoktu.
+
 ### 1. Metodoloji çıkarımı — Plan 2 ve Plan 3 yazılmadı
 **Plan 2 — Değişken eşleştirme ve çelişki çözümü:** `match_variables`, bulanık sütun eşleştirme,
 çelişki tespiti, `planner.build_plan`'ın iki kez çağrılıp bedelin hesaplanması, `DataIntake.tsx`
