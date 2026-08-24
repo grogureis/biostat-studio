@@ -28,4 +28,24 @@ describe("main-owned path capabilities", () => {
     expect(() => store.consume("project-id", "project-create")).toThrow("Invalid path capability");
     expect(store.consume("project-id", "project-open")).toBe("/private/study.biostat");
   });
+
+  it("hands a methodology document to nothing but methodology reading, and only once", () => {
+    const store = createPathCapabilityStore(() => "methodology-id");
+    const capability = store.issue("methodology-document", "/private/protocol.docx", "protocol.docx");
+
+    expect(capability).toEqual({ id: "methodology-id", displayName: "protocol.docx" });
+    expect(JSON.stringify(capability)).not.toContain("/private/");
+    expect(() => store.consume("methodology-id", "data-profile")).toThrow("Invalid path capability");
+    expect(() => store.consume("methodology-id", "data-import")).toThrow("Invalid path capability");
+    expect(store.consume("methodology-id", "methodology-document")).toBe("/private/protocol.docx");
+    expect(() => store.consume("methodology-id", "methodology-document")).toThrow("Invalid path capability");
+  });
+
+  it("does not let a data capability stand in for a methodology document", () => {
+    const store = createPathCapabilityStore(() => "profile-id");
+    store.issue("data-profile", "/private/study.xlsx", "study.xlsx");
+
+    expect(() => store.consume("profile-id", "methodology-document")).toThrow("Invalid path capability");
+    expect(store.consume("profile-id", "data-profile")).toBe("/private/study.xlsx");
+  });
 });

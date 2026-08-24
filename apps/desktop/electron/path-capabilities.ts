@@ -1,4 +1,10 @@
-export type PathCapabilityScope = "data-profile" | "data-import" | "project-create" | "project-open" | "report-save";
+export type PathCapabilityScope =
+  | "data-profile"
+  | "data-import"
+  | "project-create"
+  | "project-open"
+  | "report-save"
+  | "methodology-document";
 
 export interface PathCapability {
   id: string;
