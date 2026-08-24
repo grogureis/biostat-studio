@@ -133,3 +133,32 @@ export interface AnalysisResult {
   exclusions: string[];
   warnings: string[];
 }
+
+export interface ProposalDto {
+  value: string;
+  confidence: number;
+  evidence: string | null;
+  evidence_offset: number | null;
+  source: string;
+}
+
+/** Mirrors BriefProposal in services/analysis/biostat_service/extractors/contracts.py — all eight fields. */
+export interface BriefProposalDto {
+  title: ProposalDto | null;
+  question: ProposalDto | null;
+  hypothesis: ProposalDto | null;
+  design: ProposalDto | null;
+  outcome_concepts: ProposalDto[];
+  exposure_concepts: ProposalDto[];
+  covariate_concepts: ProposalDto[];
+  warnings: string[];
+}
+
+export interface MethodologyExtraction {
+  source_sha256: string;
+  source_format: string;
+  char_count: number;
+  truncated: boolean;
+  warnings: string[];
+  brief: BriefProposalDto;
+}

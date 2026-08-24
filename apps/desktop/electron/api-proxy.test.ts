@@ -49,3 +49,38 @@ it("injects main-owned paths and rejects renderer-supplied raw paths", async () 
     body: { source_path: "/etc/passwd", brief: { title: "Study" } },
   })).rejects.toThrow("Invalid API request");
 });
+
+it("swaps a methodology capability for its path without widening the route allowlist", async () => {
+  const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ brief: {} }), { status: 200 }));
+  const capabilities = createPathCapabilityStore(() => "methodology-cap");
+  capabilities.issue("methodology-document", "/private/protocol.docx", "protocol.docx");
+  const proxy = createAuthenticatedApiProxy(
+    () => ({ apiBase: "http://127.0.0.1:4040", token: "secret" }), request, capabilities,
+  );
+
+  await proxy({
+    path: "/v1/methodology/extract", method: "POST", body: { source_capability: "methodology-cap" },
+  });
+  expect(request.mock.calls[0][0]).toBe("http://127.0.0.1:4040/v1/methodology/extract");
+  expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ source_path: "/private/protocol.docx" });
+
+  await expect(proxy({
+    path: "/v1/methodology/extract", method: "POST", body: { source_path: "/etc/passwd" },
+  })).rejects.toThrow("Invalid API request");
+  await expect(proxy({ path: "/v1/methodology", method: "POST", body: {} })).rejects.toThrow("Invalid API request");
+  await expect(proxy({ path: "/v1/methodology/extract", method: "GET" })).rejects.toThrow("Invalid API request");
+});
+
+it("refuses to read a methodology document through a capability issued for tabular data", async () => {
+  const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ brief: {} }), { status: 200 }));
+  const capabilities = createPathCapabilityStore(() => "profile-cap");
+  capabilities.issue("data-profile", "/private/patient-study.xlsx", "patient-study.xlsx");
+  const proxy = createAuthenticatedApiProxy(
+    () => ({ apiBase: "http://127.0.0.1:4040", token: "secret" }), request, capabilities,
+  );
+
+  await expect(proxy({
+    path: "/v1/methodology/extract", method: "POST", body: { source_capability: "profile-cap" },
+  })).rejects.toThrow("Invalid path capability");
+  expect(request).not.toHaveBeenCalled();
+});

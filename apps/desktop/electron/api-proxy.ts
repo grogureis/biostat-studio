@@ -8,7 +8,10 @@ type SessionProvider = () => SidecarSession | Promise<SidecarSession>;
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const API_CAPABILITIES: ReadonlyArray<{ method: ApiRequest["method"]; route: RegExp }> = [
   { method: "GET", route: /^\/v1\/session$/ },
-  { method: "POST", route: /^\/v1\/(?:data\/profile|projects|projects\/open|plans|plans\/approval|jobs|reports)$/ },
+  {
+    method: "POST",
+    route: /^\/v1\/(?:data\/profile|methodology\/extract|projects|projects\/open|plans|plans\/approval|jobs|reports)$/,
+  },
   { method: "POST", route: new RegExp(`^/v1/projects/${UUID}/data-approval$`) },
   { method: "GET", route: new RegExp(`^/v1/jobs/${UUID}$`) },
   { method: "POST", route: new RegExp(`^/v1/jobs/${UUID}/cancel$`) },
@@ -49,6 +52,9 @@ export function createAuthenticatedApiProxy(
         body = { ...remaining, [pathKey]: path };
       };
       if (apiRequest.path === "/v1/data/profile") inject("source_capability", "source_path", "data-profile");
+      if (apiRequest.path === "/v1/methodology/extract") {
+        inject("source_capability", "source_path", "methodology-document");
+      }
       if (apiRequest.path === "/v1/projects") {
         inject("source_capability", "source_path", "data-import");
         if (body && typeof body === "object") {

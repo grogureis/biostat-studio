@@ -21,6 +21,7 @@ for package in (
     "openpyxl",
     "pandas",
     "pydantic",
+    "pypdf",
     "scipy",
     "statsmodels",
     "uvicorn",

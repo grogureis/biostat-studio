@@ -9,6 +9,7 @@ interface BiostatBridge {
     profileCapability: string;
     importCapability: string;
   } | null>;
+  selectMethodologyDocument(): Promise<PathCapability | null>;
   selectProject(mode: "create" | "open"): Promise<PathCapability | null>;
   selectReportDestination(): Promise<PathCapability | null>;
   requestApi(request: {

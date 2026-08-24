@@ -71,6 +71,18 @@ function registerIpcHandlers(): void {
     };
   });
 
+  ipcMain.handle("biostat:select-methodology-document", async (event) => {
+    trusted(event);
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ["openFile"],
+      filters: [{ name: "Methodology document", extensions: ["docx", "pdf", "txt", "md"] }],
+    });
+    const path = result.filePaths[0];
+    return result.canceled || !path
+      ? null
+      : pathCapabilities.issue("methodology-document", path, basename(path));
+  });
+
   ipcMain.handle("biostat:select-project", async (event, mode: unknown) => {
     trusted(event);
     if (mode !== "create" && mode !== "open") throw new Error("Invalid project picker mode");
