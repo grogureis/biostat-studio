@@ -360,6 +360,25 @@ def _merged_warnings(document_warnings: tuple[str, ...], brief_warnings: list[st
     return merged
 
 
+def _methodology_document(payload: MethodologyPayload) -> MethodologyDocument:
+    """Rebuild the document projects.attach_methodology expects from a payload.
+
+    Shared by both entry points (project creation and attach-to-an-open-
+    project) so the field mapping is written once. `warnings` is always
+    empty here: those were already surfaced to the caller by the earlier
+    /methodology/extract call and have no further use once the caller sends
+    the text back for attachment.
+    """
+    return MethodologyDocument(
+        source_sha256=payload.source_sha256,
+        source_format=payload.source_format,
+        text=payload.text,
+        char_count=payload.char_count,
+        truncated=payload.truncated,
+        warnings=(),
+    )
+
+
 def _job_payload(job: JobState) -> dict[str, Any]:
     return {
         "id": str(job.id),
@@ -624,14 +643,7 @@ def create_app() -> FastAPI:
             if request.methodology is not None:
                 attach_methodology(
                     project,
-                    MethodologyDocument(
-                        source_sha256=request.methodology.source_sha256,
-                        source_format=request.methodology.source_format,
-                        text=request.methodology.text,
-                        char_count=request.methodology.char_count,
-                        truncated=request.methodology.truncated,
-                        warnings=(),
-                    ),
+                    _methodology_document(request.methodology),
                     request.methodology.original_name,
                 )
                 append_audit_event(
@@ -659,15 +671,9 @@ def create_app() -> FastAPI:
     ) -> dict[str, bool]:
         context = _get_context(projects, project_id)
         with context.state_lock:
-            document = MethodologyDocument(
-                source_sha256=request.source_sha256,
-                source_format=request.source_format,
-                text=request.text,
-                char_count=request.char_count,
-                truncated=request.truncated,
-                warnings=(),
+            attach_methodology(
+                context.project, _methodology_document(request), request.original_name
             )
-            attach_methodology(context.project, document, request.original_name)
             context.methodology = read_methodology(context.project)
             append_audit_event(
                 context.project,

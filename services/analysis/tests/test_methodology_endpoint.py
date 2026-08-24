@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,13 +25,21 @@ def headers() -> dict[str, str]:
     return {"Authorization": "Bearer test-token"}
 
 
-def _create_project(client: TestClient, tmp_path: Path) -> str:
+_PROJECT_ROOT_NAME = "project.biostat"
+
+
+def _create_project(
+    client: TestClient, tmp_path: Path, *, methodology: dict | None = None
+) -> str:
     """Create a minimal project over HTTP and return its id.
 
     Mirrors the inline /v1/projects setup repeated throughout
     test_service_security.py (workbook + smallest valid StudyBrief) — there
     is no shared fixture for it yet, so this follows that established shape
-    rather than inventing a new one.
+    rather than inventing a new one. `methodology`, when given, rides along
+    on the request body so this one helper covers both entry paths named in
+    the task: attaching to an already-open project, and being born with a
+    document already set.
     """
     workbook_path = tmp_path / "source.xlsx"
     workbook = Workbook()
@@ -46,15 +55,14 @@ def _create_project(client: TestClient, tmp_path: Path) -> str:
         "outcome_variables": ["outcome"],
         "exposure_variables": ["group"],
     }
-    response = client.post(
-        "/v1/projects",
-        json={
-            "source_path": str(workbook_path),
-            "project_root": str(tmp_path / "project.biostat"),
-            "brief": brief,
-        },
-        headers=headers(),
-    )
+    body: dict[str, object] = {
+        "source_path": str(workbook_path),
+        "project_root": str(tmp_path / _PROJECT_ROOT_NAME),
+        "brief": brief,
+    }
+    if methodology is not None:
+        body["methodology"] = methodology
+    response = client.post("/v1/projects", json=body, headers=headers())
     return response.json()["id"]
 
 
@@ -259,3 +267,46 @@ def test_document_attached_to_an_open_project_is_readable_again(
 
     assert response.status_code == 200
     assert response.json() == {"attached": True}
+
+
+def test_project_created_with_a_methodology_document_attaches_it(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Covers the "birth" entry path: methodology set inside /v1/projects.
+
+    The sibling test above covers "already open" (POST .../methodology);
+    this one had no coverage at all before this test — the
+    attach_methodology/audit branch inside create_local_project, and the
+    read_methodology call that keeps its in-memory context in sync with
+    what was just written, ran with zero assertions anywhere in the suite.
+    """
+    methodology_payload = {
+        "text": "Yöntem\nKesitsel çalışma.",
+        "source_sha256": "c" * 64,
+        "source_format": "docx",
+        "original_name": "yontem-created.docx",
+        "char_count": 24,
+        "truncated": False,
+    }
+
+    project_id = _create_project(client, tmp_path, methodology=methodology_payload)
+    project_root = tmp_path / _PROJECT_ROOT_NAME
+
+    # The document itself landed on disk, not just a manifest reference.
+    assert (project_root / "source" / "methodology.txt").read_text(
+        encoding="utf-8"
+    ) == "Yöntem\nKesitsel çalışma."
+
+    # Durably audited at birth, same pattern as
+    # test_service_security.py:168-169.
+    audit = (project_root / "audit.jsonl").read_text(encoding="utf-8")
+    assert audit.count('"type": "methodology_document_attached"') == 1
+
+    # In-memory state already reflects the document without a restart. This
+    # is the assertion that fails if create_local_project's own
+    # `methodology = read_methodology(project)` line is deleted — without
+    # it context.methodology stays None until the project is closed and
+    # reopened, even though the document is already durable on disk.
+    context = client.app.state.projects[UUID(project_id)]
+    assert context.methodology is not None
+    assert context.methodology.original_name == "yontem-created.docx"
