@@ -18,24 +18,48 @@ from .contracts import EVIDENCE_MAX_CHARS, BriefProposal, Proposal
 # da sığar (spec §5, bağlam bütçesi).
 SELECTION_BUDGET = 12_000
 
-# Tasarım sözlüğü. Sıra ÖNEMLİ: daha özgül kalıplar önce denenir, çünkü
-# "randomize kontrollü çalışma" hem trial hem cohort kelimesi taşıyabilir.
+# Dash class for compound terms like "case-control" / "cross-sectional".
+# Journals typeset these with an EN DASH (U+2013), not the ASCII hyphen "-"
+# people type by hand. Measured on PMC9801609 ("Hospital-based
+# case–control study"): an ASCII-only "[\s-]*" class never matched the en
+# dash, so case_control never fired and the engine fell through to `cohort`
+# via an unrelated "...recruited from a cohort study..." mention later in
+# the same text. Covers the Unicode dash block U+2010 HYPHEN through U+2015
+# HORIZONTAL BAR (which includes the en dash U+2013 and em dash U+2014) plus
+# the ASCII hyphen, so any dash style a journal uses is matched. Defined
+# once here so every pattern that needs a dash reuses this instead of
+# drifting out of sync.
+DASH_CLASS = "\\-\u2010-\u2015"
+
+# Tasarım sözlüğü. `_design` artık listedeki İLK eşleşeni değil, metinde EN
+# ERKEN geçen eşleşmeyi seçiyor: metodoloji bölümleri kendi tasarımını
+# genelde en başta söyler, metnin ilerisinde aynı anahtar kelimenin tekrar
+# geçmesi çoğunlukla bir ATIF ya da karşılaştırmadır. Ölçüm: PMC12170779
+# (altın yanıt: cohort) karakter ~185'te "...their respective cohorts..."
+# diyerek kendi tasarımını söylüyor, ama karakter ~2690'da "MultiCase-Control
+# Study-Spain" adlı başka bir çalışmadan bahsediyor — yalnızca liste sırasına
+# bakan eski mantık case_control'ü cohort'tan önce dener, atıfı kazandırır ve
+# yanlış yanıt üretirdi. Liste sırası ARTIK SADECE iki kalıp metinde tam aynı
+# ofsette eşleştiğinde eşitlik bozucu (tie-break) olarak kullanılıyor.
 #
 # `repeated` yalnızca tasarımı KESİN olarak söyleyen ifadeleri taşır. Buradan
 # "longitudinal follow-?up" çıkarıldı: o bir izlem TAKVİMİdir, tasarım değil.
 # "Retrospective cohort study with longitudinal follow-up" gözlemsel klinik
-# metodolojinin en yaygın cümlesidir ve `repeated` `cohort`tan önce denendiği
-# için `repeated` dönüyordu; üstelik yanıtla birlikte gösterilen evidence
-# cümlesi "cohort study" yazıyordu. Sadece sırayı değiştirmek yetmezdi:
-# tasarım kelimesi geçmeyen "Longitudinal follow-up was performed." yine
-# `repeated` olurdu. Sonuç kozmetik değil — planner.py design == "repeated"
-# üzerinden denek-içi eşleştirilmiş analize dallanıyor.
+# metodolojinin en yaygın cümlesidir; kalıp geniş tutulsaydı bu cümlede
+# `repeated` ile `cohort` yakın ofsetlerde eşleşir ve hangisinin kazanacağı
+# metne bağlı kırılgan bir yarışa dönerdi. Kalıbı dar tutmak bu yarışı baştan
+# önlüyor: tasarım kelimesi hiç geçmeyen "Longitudinal follow-up was
+# performed." hâlâ None dönüyor. Sonuç kozmetik değil — planner.py
+# design == "repeated" üzerinden denek-içi eşleştirilmiş analize dallanıyor.
 DESIGN_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("case_control", r"olgu[\s-]*kontrol|vaka[\s-]*kontrol|case[\s-]*control"),
+    (
+        "case_control",
+        rf"olgu[\s{DASH_CLASS}]*kontrol|vaka[\s{DASH_CLASS}]*kontrol|case[\s{DASH_CLASS}]*control",
+    ),
     ("trial", r"randomize|randomised|randomized|klinik araştırma|controlled trial"),
     ("repeated", r"tekrarl[ıi] ölçüm|tekrarlayan ölçüm|repeated measures"),
     ("cohort", r"kohort|cohort"),
-    ("cross_sectional", r"kesitsel|cross[\s-]*sectional"),
+    ("cross_sectional", rf"kesitsel|cross[\s{DASH_CLASS}]*sectional"),
 )
 
 # Sabit bir sentinel: "bir kalıp eşleşti ama bağlamı doğrulayamadım" demektir.
@@ -67,29 +91,46 @@ class RuleExtractor:
         )
 
     def _design(self, original_text: str, text: str) -> Proposal | None:
+        # Pick the pattern whose match starts EARLIEST in `text`, not the
+        # first pattern in DESIGN_PATTERNS order that matches anywhere.
+        # Methods sections state their own design up front; a keyword that
+        # recurs later is usually a citation or a comparison to another
+        # study (see the DESIGN_PATTERNS comment for the measured case).
+        # Scanning in list order and only replacing `best` on a STRICTLY
+        # earlier offset means that when two patterns match at the exact
+        # same offset, the one earlier in DESIGN_PATTERNS wins — the
+        # documented tie-break, and it is applied the same way regardless
+        # of dict/set iteration, so the result is deterministic.
+        best_design: str | None = None
+        best_match: re.Match[str] | None = None
         for design, pattern in DESIGN_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
             if match is None:
                 continue
-            evidence = self._sentence_around(text, match.start())
-            # `text` (the selected slice) is not a contiguous substring of
-            # `original_text` in general — select_relevant_text can merge
-            # several method sections joined by "\n". Locating the evidence
-            # sentence directly in the original text is the only offset that
-            # is guaranteed correct regardless of how many sections were
-            # merged. find() returns -1 when the sentence can't be located
-            # (e.g. it was truncated at the selection budget boundary); store
-            # None rather than a bogus negative offset.
-            found = original_text.find(evidence)
-            evidence_offset = found if found >= 0 else None
-            return Proposal(
-                value=design,
-                confidence=RULE_CONFIDENCE,
-                evidence=evidence,
-                evidence_offset=evidence_offset,
-                source=self.name,
-            )
-        return None
+            if best_match is None or match.start() < best_match.start():
+                best_design, best_match = design, match
+
+        if best_match is None:
+            return None
+
+        evidence = self._sentence_around(text, best_match.start())
+        # `text` (the selected slice) is not a contiguous substring of
+        # `original_text` in general — select_relevant_text can merge
+        # several method sections joined by "\n". Locating the evidence
+        # sentence directly in the original text is the only offset that
+        # is guaranteed correct regardless of how many sections were
+        # merged. find() returns -1 when the sentence can't be located
+        # (e.g. it was truncated at the selection budget boundary); store
+        # None rather than a bogus negative offset.
+        found = original_text.find(evidence)
+        evidence_offset = found if found >= 0 else None
+        return Proposal(
+            value=best_design,
+            confidence=RULE_CONFIDENCE,
+            evidence=evidence,
+            evidence_offset=evidence_offset,
+            source=self.name,
+        )
 
     @staticmethod
     def _sentence_around(text: str, index: int) -> str:

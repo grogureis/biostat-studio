@@ -165,3 +165,53 @@ def test_warnings_are_populated_when_no_method_section_is_found() -> None:
     result = RuleExtractor().extract_brief(document)
 
     assert result.warnings == ("no_method_section",)
+
+
+# --- MEASUREMENT (PMC9801609, gold: case_control): "Hospital-based
+# case–control study" uses an EN DASH (U+2013), the character journals
+# actually typeset between "case" and "control" — not the ASCII hyphen "-"
+# people type by hand. An ASCII-only dash class never matches this sentence
+# at all, so case_control never fires and the engine falls through to
+# `cohort` on an unrelated "...recruited from a cohort study..." mention
+# later in the same methods section. The en dash below is typed literally,
+# not escaped, so the test fails the same way real journal text would.
+def test_detects_case_control_with_en_dash() -> None:
+    document = make_document("Methods\nHospital-based case–control study was conducted.")
+
+    assert RuleExtractor().extract_brief(document).design.value == "case_control"
+
+
+# --- MEASUREMENT (PMC12170779, gold: cohort): the methods section states its
+# own design in the first sentence ("...in their respective cohorts, and a
+# completed follow-up...", ~char 185) but, ~2000 characters later, cites an
+# unrelated study by name that happens to contain "Case-Control" in its
+# title ("MultiCase-Control Study-Spain"). Selecting the first pattern that
+# matches ANYWHERE in the text (list order: case_control before cohort) lets
+# that citation outrank the study's own design statement. The correct
+# behaviour is to prefer whichever pattern matches EARLIEST in the text.
+def test_cohort_design_stated_early_outranks_a_later_cited_study_name() -> None:
+    padding = "Participants were recruited through routine clinical visits. " * 33
+    text = (
+        "Methods\n"
+        "Participants were followed as members of their respective cohorts, "
+        "and a completed follow-up questionnaire was required for inclusion "
+        "in the analysis.\n"
+        + padding
+        + "Our findings are consistent with the MultiCase-Control Study-Spain, "
+        "which reported similar associations.\n"
+    )
+    assert len(padding) > 1900, "padding must place the citation ~2000 chars later"
+    document = make_document(text)
+
+    design = RuleExtractor().extract_brief(document).design
+
+    assert design is not None
+    assert design.value == "cohort"
+
+
+# --- MEASUREMENT: same dash defect as case_control, for cross_sectional's
+# "cross[\\s-]*sectional" alternative. The en dash is typed literally.
+def test_detects_cross_sectional_with_en_dash() -> None:
+    document = make_document("Methods\nA cross–sectional survey was conducted.")
+
+    assert RuleExtractor().extract_brief(document).design.value == "cross_sectional"
