@@ -19,6 +19,7 @@ from biostat_service.study_model import VERTICAL_SLICE_METHOD_IDS
 
 
 SCHEMA_VERSION = 2
+METHODOLOGY_RELATIVE = Path("source") / "methodology.txt"
 ARTIFACT_DIRECTORIES = (
     Path("artifacts"),
     Path("artifacts") / "figures",
@@ -150,6 +151,18 @@ class AuditEvent:
         if self.method_ids is not None:
             record["method_ids"] = list(self.method_ids)
         return record
+
+
+@dataclass(frozen=True)
+class MethodologyRecord:
+    """One methodology document as the project durably remembers it."""
+
+    text: str
+    source_sha256: str
+    source_format: str
+    original_name: str
+    char_count: int
+    truncated: bool
 
 
 def _json_value(value: Any) -> Any:
@@ -487,7 +500,7 @@ def save_project_state(project: LocalProject, state: Mapping[str, Any]) -> None:
 
 
 def create_project(root: Path, brief: StudyBrief, profile: DataProfile) -> LocalProject:
-    """Create or reopen one project folder without copying its source dataset."""
+    """Create or reopen one project folder, snapshotting its source workbook."""
     project = LocalProject(Path(root))
     if project.root.exists() and not project.root.is_dir():
         raise ValueError("project_root_not_directory")
@@ -538,3 +551,47 @@ def append_audit_event(project: LocalProject, event: Mapping[str, Any]) -> None:
         handle.write(serialized)
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def attach_methodology(
+    project: LocalProject, document: Any, original_name: str
+) -> None:
+    """Store the extracted text next to the workbook snapshot, atomically.
+
+    The ORIGINAL .docx/.pdf is deliberately NOT copied (STATE.md 0d): the only
+    thing it could yield was text, and the text is already here. Its name and
+    sha256 are kept so "which document did this come from" stays answerable.
+    """
+    destination = _safe_relative_reference(project.root, METHODOLOGY_RELATIVE.as_posix())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_text_write(destination, document.text)
+    manifest = _read_manifest(project)
+    manifest["methodology"] = {
+        "relative_path": METHODOLOGY_RELATIVE.as_posix(),
+        "sha256": document.source_sha256,
+        "source_format": document.source_format,
+        "original_name": original_name,
+        "char_count": document.char_count,
+        "truncated": document.truncated,
+    }
+    _validate_relative_references(project.root, manifest)
+    atomic_json_write(project.manifest_path, manifest)
+
+
+def read_methodology(project: LocalProject) -> MethodologyRecord | None:
+    """Read the stored document text, or None when the study has no document."""
+    manifest = _read_manifest(project)
+    record = manifest.get("methodology")
+    if not isinstance(record, Mapping):
+        return None
+    path = _safe_relative_reference(project.root, record.get("relative_path"))
+    if not path.is_file():
+        raise ValueError("methodology_document_missing")
+    return MethodologyRecord(
+        text=path.read_text(encoding="utf-8"),
+        source_sha256=str(record.get("sha256", "")),
+        source_format=str(record.get("source_format", "")),
+        original_name=str(record.get("original_name", "")),
+        char_count=int(record.get("char_count", 0)),
+        truncated=bool(record.get("truncated", False)),
+    )
