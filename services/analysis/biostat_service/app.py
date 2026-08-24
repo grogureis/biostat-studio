@@ -23,6 +23,9 @@ from uvicorn import Config, Server
 from .analyses import AnalysisBundle, run_plan
 from .contracts import AnalysisPlan, StudyBrief, VariableRole
 from .data_intake import DataProfile, canonicalize_frame_columns, profile_excel
+from .extractors.contracts import BriefProposal, Proposal
+from .extractors.rule import RuleExtractor
+from .methodology_intake import MethodologyIntakeError, extract_document
 from .power import PowerRequest, PowerValidationError, compute_power
 from .jobs import JobManager, JobState, StagedJobResult
 from .planner import build_plan
@@ -61,6 +64,10 @@ class ProjectRequest(BaseModel):
 
 
 class DataProfileRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+
+
+class MethodologyExtractRequest(BaseModel):
     source_path: str = Field(min_length=1)
 
 
@@ -275,6 +282,49 @@ def _profile_payload(profile: DataProfile) -> dict[str, Any]:
             for warning in profile.warnings
         ],
     }
+
+
+def _proposal_payload(proposal: Proposal | None) -> dict[str, Any] | None:
+    if proposal is None:
+        return None
+    return {
+        "value": proposal.value,
+        "confidence": proposal.confidence,
+        "evidence": proposal.evidence,
+        "evidence_offset": proposal.evidence_offset,
+        "source": proposal.source,
+    }
+
+
+def _brief_proposal_payload(brief: BriefProposal) -> dict[str, Any]:
+    """Serialize every BriefProposal field, warnings included.
+
+    The warnings are part of the payload because the endpoint merges them with
+    the document's own warnings; dropping them here would silently lose
+    "no_method_section" and leave the user with no way to learn that the
+    methods section was never found.
+    """
+    return {
+        "title": _proposal_payload(brief.title),
+        "question": _proposal_payload(brief.question),
+        "hypothesis": _proposal_payload(brief.hypothesis),
+        "design": _proposal_payload(brief.design),
+        "outcome_concepts": [_proposal_payload(item) for item in brief.outcome_concepts],
+        "exposure_concepts": [_proposal_payload(item) for item in brief.exposure_concepts],
+        "covariate_concepts": [
+            _proposal_payload(item) for item in brief.covariate_concepts
+        ],
+        "warnings": list(brief.warnings),
+    }
+
+
+def _merged_warnings(document_warnings: tuple[str, ...], brief_warnings: list[str]) -> list[str]:
+    """Document warnings first, then brief warnings, de-duplicated, order-stable."""
+    merged: list[str] = []
+    for warning in (*document_warnings, *brief_warnings):
+        if warning not in merged:
+            merged.append(warning)
+    return merged
 
 
 def _job_payload(job: JobState) -> dict[str, Any]:
@@ -497,6 +547,31 @@ def create_app() -> FastAPI:
             return _profile_payload(profile_excel(Path(request.source_path)))
         except (OSError, ValueError, RuntimeError):
             raise HTTPException(status_code=422, detail="data_profile_failed")
+
+    @v1.post("/methodology/extract")
+    def methodology_extract(request: MethodologyExtractRequest) -> dict[str, Any]:
+        try:
+            document = extract_document(Path(request.source_path))
+        except MethodologyIntakeError as exc:
+            # str(exc) is a stable code from methodology_intake, never a value
+            # or a path; every other failure collapses to one stable code.
+            raise HTTPException(
+                status_code=422, detail=f"methodology_intake_failed:{exc}"
+            ) from exc
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise HTTPException(
+                status_code=422, detail="methodology_intake_failed:unreadable_document"
+            ) from exc
+
+        brief = _brief_proposal_payload(RuleExtractor().extract_brief(document))
+        return {
+            "source_sha256": document.source_sha256,
+            "source_format": document.source_format,
+            "char_count": document.char_count,
+            "truncated": document.truncated,
+            "warnings": _merged_warnings(document.warnings, brief["warnings"]),
+            "brief": brief,
+        }
 
     @v1.post("/projects")
     def create_local_project(request: ProjectRequest) -> dict[str, Any]:
