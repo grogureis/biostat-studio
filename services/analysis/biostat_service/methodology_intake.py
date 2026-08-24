@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 
 from docx import Document
+
+from biostat_service.data_intake import sha256_file
 
 
 MAX_DOCUMENT_BYTES = 25 * 1024 * 1024
@@ -50,8 +51,8 @@ def extract_document(path: Path) -> MethodologyDocument:
 
     try:
         size = path.stat().st_size
-    except OSError as exc:
-        raise MethodologyIntakeError("unreadable_document") from exc
+    except OSError:
+        raise MethodologyIntakeError("unreadable_document") from None
     if size > MAX_DOCUMENT_BYTES:
         raise MethodologyIntakeError("file_too_large")
 
@@ -59,8 +60,8 @@ def extract_document(path: Path) -> MethodologyDocument:
         raw = _read_docx(path) if source_format == "docx" else _read_plain(path)
     except MethodologyIntakeError:
         raise
-    except Exception as exc:  # noqa: BLE001 - any reader failure is one stable code
-        raise MethodologyIntakeError("unreadable_document") from exc
+    except Exception:  # noqa: BLE001 - any reader failure is one stable code
+        raise MethodologyIntakeError("unreadable_document") from None
 
     text = raw.strip()
     if not text:
@@ -73,7 +74,7 @@ def extract_document(path: Path) -> MethodologyDocument:
         warnings.append("document_truncated")
 
     return MethodologyDocument(
-        source_sha256=sha256(path.read_bytes()).hexdigest(),
+        source_sha256=sha256_file(path),
         source_format=source_format,
         text=text,
         char_count=len(text),

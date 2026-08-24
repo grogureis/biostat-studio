@@ -102,3 +102,20 @@ def test_error_message_never_contains_the_file_path(tmp_path: Path) -> None:
 
     assert "secret-patient-study" not in str(excinfo.value)
     assert str(tmp_path) not in str(excinfo.value)
+
+
+def test_formatted_traceback_never_contains_the_file_path(tmp_path: Path) -> None:
+    import traceback
+
+    path = tmp_path / "secret-patient-study.docx"
+    path.write_text("not really a docx", encoding="utf-8")
+
+    try:
+        extract_document(path)
+    except MethodologyIntakeError as exc:
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    else:
+        raise AssertionError("expected MethodologyIntakeError")
+
+    assert "secret-patient-study" not in rendered
+    assert str(tmp_path) not in rendered
