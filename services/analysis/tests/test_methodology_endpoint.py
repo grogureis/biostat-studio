@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from biostat_service.app import create_app
+from biostat_service.app import _proposal_payload, create_app
+from biostat_service.extractors.contracts import EVIDENCE_MAX_CHARS, Proposal
+from biostat_service.methodology_intake import MAX_DOCUMENT_CHARS
 
 
 @pytest.fixture
@@ -85,3 +87,89 @@ def test_missing_method_section_is_reported_in_the_response_warnings(
     body = response.json()
     assert "no_method_section" in body["warnings"]
     assert body["brief"]["design"]["value"] == "cohort"
+
+
+def test_truncated_document_without_a_method_section_merges_both_warnings(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Document warnings first, then brief warnings — the merge order is pinned."""
+    path = tmp_path / "long.txt"
+    path.write_text("Giriş\n" + "Hastalar kohort olarak izlendi. " * 7_000, encoding="utf-8")
+    assert path.stat().st_size > MAX_DOCUMENT_CHARS
+
+    response = client.post(
+        "/v1/methodology/extract", json={"source_path": str(path)}, headers=headers()
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["truncated"] is True
+    assert body["warnings"] == ["document_truncated", "no_method_section"]
+
+
+def test_evidence_is_bounded_when_the_document_carries_no_punctuation(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A punctuation-free document (pasted table, OCR) must not return itself.
+
+    Without a bounded sentence window the evidence fallback runs to the end of
+    the document, publishing every value in it over HTTP.
+    """
+    path = tmp_path / "table.txt"
+    path.write_text(
+        "kohort calismasi "
+        + " ".join(f"hasta{index} yas{20 + index % 50} deger{index * 3}" for index in range(400)),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/v1/methodology/extract", json={"source_path": str(path)}, headers=headers()
+    )
+
+    assert response.status_code == 200
+    evidence = response.json()["brief"]["design"]["evidence"]
+    assert len(evidence) <= EVIDENCE_MAX_CHARS + 1  # +1 allows the clipping ellipsis
+    assert "hasta399" not in response.text
+    assert "deger1197" not in response.text
+
+
+def test_an_ordinary_sentence_is_returned_whole_and_unclipped(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The cap must not damage the normal path — this is the plausible regression."""
+    sentence = (
+        "Bu çalışmada 2019-2024 yılları arasında kliniğimize başvuran hastalar "
+        "retrospektif kohort tasarımıyla incelenmiştir."
+    )
+    path = tmp_path / "normal.txt"
+    path.write_text(f"Yöntem\n{sentence}\nBulgular\nHastaların yaş ortalaması verildi.", encoding="utf-8")
+
+    response = client.post(
+        "/v1/methodology/extract", json={"source_path": str(path)}, headers=headers()
+    )
+
+    assert response.status_code == 200
+    evidence = response.json()["brief"]["design"]["evidence"]
+    assert evidence == sentence
+    assert "…" not in evidence
+
+
+def test_proposal_serializer_clips_over_long_evidence_on_its_own() -> None:
+    """Layer 2 stands alone: it must clip evidence _sentence_around never saw.
+
+    Proposal is the shared contract for every future engine, including the
+    language-model one, whose evidence is not bounded by the rule extractor.
+    """
+    proposal = Proposal(
+        value="cohort",
+        confidence=0.7,
+        evidence="hasta-001 " * ((EVIDENCE_MAX_CHARS // 10) + 20),
+        evidence_offset=0,
+    )
+
+    payload = _proposal_payload(proposal)
+
+    assert payload is not None
+    assert len(payload["evidence"]) == EVIDENCE_MAX_CHARS + 1
+    assert payload["evidence"].endswith("…")
+    assert payload["evidence"][:-1] == proposal.evidence[:EVIDENCE_MAX_CHARS]

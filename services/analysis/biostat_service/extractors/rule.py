@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from ..methodology_intake import MethodologyDocument, select_relevant_text
-from .contracts import BriefProposal, Proposal
+from .contracts import EVIDENCE_MAX_CHARS, BriefProposal, Proposal
 
 
 # Modele/kurala giden metin bütçesi. 12_000 karakter ~3 sayfa yoğun metin;
@@ -72,9 +72,36 @@ class RuleExtractor:
 
     @staticmethod
     def _sentence_around(text: str, index: int) -> str:
-        start = max(text.rfind(".", 0, index), text.rfind("\n", 0, index)) + 1
-        end = min(
-            (position for position in (text.find(".", index), text.find("\n", index)) if position != -1),
-            default=len(text),
+        """The sentence containing `index`, searched only within a bounded window.
+
+        Sentence delimiters are looked for within ±EVIDENCE_MAX_CHARS of the
+        match. Searching the whole document instead means that a text carrying
+        no "." or newline near the match — a pasted table, a bullet list, OCR
+        output with punctuation stripped — falls back to the entire document,
+        and that evidence is published in the HTTP response. When no delimiter
+        exists inside the window the text is cut at the window edge and marked
+        with "…" so the reader can see the evidence was clipped.
+        """
+        window_start = max(0, index - EVIDENCE_MAX_CHARS)
+        window_end = min(len(text), index + EVIDENCE_MAX_CHARS)
+
+        opening = max(
+            text.rfind(".", window_start, index), text.rfind("\n", window_start, index)
         )
-        return text[start: end + 1].strip()
+        start = opening + 1 if opening >= 0 else window_start
+
+        closing = [
+            position
+            for position in (
+                text.find(".", index, window_end),
+                text.find("\n", index, window_end),
+            )
+            if position != -1
+        ]
+        if closing:
+            return text[start: min(closing) + 1].strip()
+
+        # No delimiter ahead. Reaching window_end is the document's own end
+        # only when the window got there; otherwise the sentence is clipped.
+        clipped = text[start:window_end].strip()
+        return f"{clipped}…" if window_end < len(text) else clipped

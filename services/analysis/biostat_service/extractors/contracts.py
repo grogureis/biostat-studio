@@ -5,6 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+# Evidence bütçesi. Bir metodoloji bölümündeki uzun bir akademik cümle 200-350
+# karakter arasında kalır; 400 rahat bir pay bırakır ve bunun ötesi artık bir
+# cümle değil, veri dökümüdür. Evidence HTTP yanıtına konduğu için bu sınır
+# aynı zamanda bir gizlilik sınırıdır: noktalama taşımayan bir doküman
+# (yapıştırılmış tablo, OCR çıktısı) sınırsız bir fallback ile kendisini
+# olduğu gibi geri döndürebilir.
+EVIDENCE_MAX_CHARS = 400
+
+
 @dataclass(frozen=True)
 class Proposal:
     """One machine-suggested value, always carrying its own evidence."""

@@ -23,7 +23,7 @@ from uvicorn import Config, Server
 from .analyses import AnalysisBundle, run_plan
 from .contracts import AnalysisPlan, StudyBrief, VariableRole
 from .data_intake import DataProfile, canonicalize_frame_columns, profile_excel
-from .extractors.contracts import BriefProposal, Proposal
+from .extractors.contracts import EVIDENCE_MAX_CHARS, BriefProposal, Proposal
 from .extractors.rule import RuleExtractor
 from .methodology_intake import MethodologyIntakeError, extract_document
 from .power import PowerRequest, PowerValidationError, compute_power
@@ -285,12 +285,23 @@ def _profile_payload(profile: DataProfile) -> dict[str, Any]:
 
 
 def _proposal_payload(proposal: Proposal | None) -> dict[str, Any] | None:
+    """Serialize one proposal, capping evidence before it leaves the process.
+
+    Defense in depth, not a duplicate of the rule extractor's own window:
+    Proposal is the shared contract for every extraction engine, including a
+    future language-model one that can put arbitrary text in `evidence`. This
+    serializer is the last gate before evidence reaches the HTTP response, and
+    one layer is not enough for a privacy rule.
+    """
     if proposal is None:
         return None
+    evidence = proposal.evidence
+    if evidence is not None and len(evidence) > EVIDENCE_MAX_CHARS:
+        evidence = f"{evidence[:EVIDENCE_MAX_CHARS]}…"
     return {
         "value": proposal.value,
         "confidence": proposal.confidence,
-        "evidence": proposal.evidence,
+        "evidence": evidence,
         "evidence_offset": proposal.evidence_offset,
         "source": proposal.source,
     }
