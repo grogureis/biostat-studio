@@ -100,6 +100,7 @@ def extract_document(path: Path) -> MethodologyDocument:
 # "Yöntem" kelimesini bağlam olarak kullanır.
 SECTION_HEADINGS = (
     "gereç ve yöntem",
+    "gereç ve yöntemler",
     "gerec ve yontem",
     "yöntem",
     "yontem",
@@ -128,6 +129,16 @@ STOP_HEADINGS = (
 )
 
 
+# Length-preserving Turkish casefold. str.lower() is locale-independent and
+# maps U+0130 (İ) to TWO code points ("i" + COMBINING DOT ABOVE), which both
+# (a) fails to match the ASCII-i heading literals below and (b) changes the
+# string length, corrupting every match offset computed against `lowered`
+# once it is used to slice the original (unfolded) `text`. Folding İ -> i and
+# I -> ı first, one character for one character, keeps positions aligned;
+# .lower() on the result then behaves normally for the remaining letters.
+_TURKISH_FOLD = str.maketrans({"İ": "i", "I": "ı"})
+
+
 def _heading_positions(lowered: str, headings: tuple[str, ...]) -> list[int]:
     positions: list[int] = []
     for heading in headings:
@@ -136,24 +147,55 @@ def _heading_positions(lowered: str, headings: tuple[str, ...]) -> list[int]:
     return sorted(positions)
 
 
+def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Merge overlapping/contained (start, end) intervals, sorted by start.
+
+    A method-family heading (e.g. "Statistical analysis") that occurs before
+    the same stop heading as an earlier method-family heading (e.g.
+    "Materials and Methods") produces a chunk that is a strict subset of the
+    first. Without merging, joining the chunks pastes that text in twice.
+    Intervals separated by an intervening stop (e.g. a main Methods section
+    and an appendix Methods section split by Results) stay disjoint.
+    """
+    merged: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if merged and start <= merged[-1][1]:
+            prev_start, prev_end = merged[-1]
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def select_relevant_text(text: str, budget: int) -> tuple[str, tuple[str, ...]]:
     """Return the methodology-relevant slice of a document, bounded by budget.
 
     Deterministic and engine-independent: every extractor receives the same
     slice, so a gold-set comparison measures the engine and not the cropping.
     """
-    lowered = text.lower()
+    budget = max(0, budget)
+
+    lowered = text.translate(_TURKISH_FOLD).lower()
+    if len(lowered) != len(text):
+        # Defensive guard: if some future input still changes length under
+        # folding, match offsets against `lowered` cannot be trusted to
+        # index into `text`. Fail closed to the prefix fallback rather than
+        # silently return a corrupted slice.
+        return text[:budget], ("no_method_section",)
+
     starts = _heading_positions(lowered, SECTION_HEADINGS)
 
     if not starts:
         return text[:budget], ("no_method_section",)
 
     stops = _heading_positions(lowered, STOP_HEADINGS)
-    chunks: list[str] = []
+    intervals: list[tuple[int, int]] = []
     for start in starts:
         following = [stop for stop in stops if stop > start]
         end = following[0] if following else len(text)
-        chunks.append(text[start:end])
+        intervals.append((start, end))
+
+    chunks = [text[start:end] for start, end in _merge_intervals(intervals)]
 
     selected = "\n".join(chunks)
     return selected[:budget], ()

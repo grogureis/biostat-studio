@@ -218,8 +218,100 @@ def test_falls_back_to_prefix_and_warns_when_no_section_found() -> None:
 
 
 def test_selection_never_exceeds_budget() -> None:
-    text = "İstatistiksel Analiz\n" + ("veri " * 5000)
+    # Bug D fix: the heading must actually match so this exercises the
+    # joined-chunk branch (selected[:budget]), not the no-match fallback
+    # (text[:budget]) which is already covered by the fallback test above.
+    # "Yöntem" has no İ/I, so it is unaffected by the Turkish-fold fix and
+    # isolates the budget-clamping behavior being tested here.
+    text = "Yöntem\n" + ("veri " * 5000)
 
-    selected, _ = select_relevant_text(text, budget=300)
+    selected, warnings = select_relevant_text(text, budget=300)
 
+    assert warnings == ()
     assert len(selected) <= 300
+
+
+def test_overlapping_method_sections_are_merged_not_duplicated() -> None:
+    """Bug A: Methods -> Statistical analysis -> Results is the near-universal
+    biomedical paper shape. Both headings are method-family headings whose
+    chunk both run up to the same Results stop, so the second chunk was a
+    strict subset of the first and got pasted in twice."""
+    text = (
+        "Materials and Methods\n"
+        "Patients were enrolled prospectively.\n"
+        "Statistical analysis\n"
+        "Chi-square test was used for categorical variables.\n"
+        "Results\n"
+        "Irrelevant results text.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert selected.count("Chi-square test was used") == 1
+    assert warnings == ()
+
+
+def test_disjoint_method_sections_separated_by_results_are_kept_separate() -> None:
+    """Merging must not collapse a main Methods section and an appendix
+    Methods section that are separated by an intervening Results section."""
+    text = (
+        "Methods\n"
+        "Main analysis plan described here.\n"
+        "Results\n"
+        "Primary outcome text.\n"
+        "Methods\n"
+        "Appendix sensitivity analysis plan described here.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert "Main analysis plan described here" in selected
+    assert "Appendix sensitivity analysis plan described here" in selected
+    assert warnings == ()
+
+
+def test_turkish_dotted_capital_does_not_corrupt_heading_offset() -> None:
+    """Bugs B+C: str.lower() maps U+0130 (İ) to "i" + COMBINING DOT ABOVE,
+    which both (B) fails to match the ASCII-i heading literals and (C) makes
+    len(lowered) != len(text), so a match position found in `lowered` drifts
+    when used to slice the original `text`. Preceding İ characters must not
+    shift where the returned slice starts."""
+    text = (
+        "Giriş\n"
+        "Katılımcılar İzmir, İstanbul ve İzmit şehirlerinden seçildi.\n"
+        "İstatistiksel Analiz\n"
+        "Ki-kare testi kullanıldı.\n"
+        "Bulgular\n"
+        "İlgisiz bulgular.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert warnings == ()
+    assert selected.startswith("İstatistiksel Analiz")
+
+
+def test_negative_budget_returns_empty_string() -> None:
+    """Bug E(a): text[:budget] with a negative budget slices from the end,
+    so a negative budget must be clamped to zero rather than passed through."""
+    text = "Yöntem\nKohort çalışması yapıldı.\n"
+
+    selected, _ = select_relevant_text(text, budget=-5)
+
+    assert selected == ""
+
+
+def test_matches_plural_gerec_ve_yontemler_heading() -> None:
+    """Bug E(b): "gereç ve yöntemler" (plural compound) matched neither
+    "gereç ve yöntem" (the plural suffix breaks the \\b boundary) nor
+    "yöntemler" (the line starts with "gereç", not "yöntemler")."""
+    text = (
+        "Giriş\nAlakasız.\n"
+        "Gereç ve Yöntemler\nRetrospektif kohort tasarımı kullanıldı.\n"
+        "Bulgular\nAlakasız.\n"
+    )
+
+    selected, warnings = select_relevant_text(text, budget=10_000)
+
+    assert "Retrospektif kohort tasarımı" in selected
+    assert warnings == ()
