@@ -309,7 +309,11 @@ describe("authenticated loopback API client", () => {
     await api.selectMethodologyDocument!();
     await expect(api.extractMethodology!()).resolves.toEqual(extraction);
 
-    await expect(api.extractMethodology!()).rejects.toBeInstanceOf(AnalysisApiError);
+    const rejected = api.extractMethodology!();
+    await expect(rejected).rejects.toBeInstanceOf(AnalysisApiError);
+    // Pin the code, not just the type: the renderer keys its error copy off
+    // this string, so a rename here must break a test.
+    await expect(rejected).rejects.toMatchObject({ code: "methodology_document_not_selected" });
     expect(requestApi).toHaveBeenCalledTimes(1);
   });
 
@@ -323,7 +327,9 @@ describe("authenticated loopback API client", () => {
       requestApi,
     });
 
-    await expect(api.extractMethodology!()).rejects.toBeInstanceOf(AnalysisApiError);
+    const rejected = api.extractMethodology!();
+    await expect(rejected).rejects.toBeInstanceOf(AnalysisApiError);
+    await expect(rejected).rejects.toMatchObject({ code: "methodology_document_not_selected" });
     expect(requestApi).not.toHaveBeenCalled();
   });
 });

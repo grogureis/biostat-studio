@@ -208,7 +208,7 @@ export function App({ api }: { api: AnalysisApi }) {
     </aside>
     <main id="workspace" tabIndex={-1}>
       {failedOperation ? <ErrorBanner language={project.language} operation={failedOperation} detail={safeErrorDetail} onRetry={retryFailedOperation} /> : null}
-      {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} language={project.language} /> : null}
+      {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} language={project.language} api={api} /> : null}
       {project.activeStep === "data" ? <DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} onFile={changeDataFile} onApproval={approveData} language={project.language} /> : null}
       {project.activeStep === "plan" ? <PlanReview language={project.language} plan={project.plan} loading={planning} approved={project.planApproved} onApproval={(next) => void changePlanApproval(next)} onRun={() => void runAnalysis()} onAlternative={selectAlternative} /> : null}
       {project.activeStep === "power" ? <PowerPlanner api={api} language={project.language} /> : null}
