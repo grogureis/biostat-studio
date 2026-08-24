@@ -355,27 +355,58 @@ raporlandı, `8f` tarafından git ile doğrulanıp yazıldı. 1b Task 8'i uygula
 
 ## Sıradaki iş
 
-**1. ⏸️ MOLA VERİLDİ — Plan 2 çalıştırması yarıda, Task 2'nin incelemesi bekliyor.**
-2026-08-24 ~22:10, Erdem 30 dakikalık mola istedi. **Dönüşte "devam" demesi yeterli.**
+**1. ⏸️ GÜN SONU MOLASI — Plan 2 çalıştırması 4/10 task tamam, yarın devam.**
+2026-08-24 gece, Erdem eve gidiyor. **Yarın "devam" demesi yeterli.**
 
 Dal: `feat/methodology-matching` (worktree `.worktrees/methodology-intake`; worktree adı eski
 dalın adını taşıyor, **dal adına bakın**). Base `1be5ebe`.
-Yöntem: subagent-driven, her task'tan sonra inceleme, sonda tam dal incelemesi (Erdem'in kararı).
+Yöntem: subagent-driven, her task'tan sonra inceleme, sonda **zorunlu** tam dal incelemesi
+(Erdem'in kararı). Uygulayan ile denetleyen ayrı — Plan 1'in ölçülmüş dersi.
 Ledger — **tek doğru kaynak**: `.superpowers/sdd/2026-08-24-metodoloji-eslestirme-plan2/progress.md`
 (git-ignored; `git clean -fdx` onu siler, o zaman `git log`'dan kurtarın).
+Ölçüm: **287 Python + 70 desktop**, typecheck temiz, çalışma ağacı temiz.
 
 | Task | Durum |
 |---|---|
-| 1 — Belgenin evi (`projects.py`) | ✅ complete (`1be5ebe..268f3ca`), inceleme temiz, 1 fix turu |
-| 2 — Servis yüzeyi (`app.py`) | 🔶 kodlandı (`73ec559`, 284 passed) — **incelemesi gönderilmedi** |
-| 3-10 | başlanmadı, briefleri hazır |
+| 1 — Belgenin evi (`projects.py`) | ✅ complete (`1be5ebe..268f3ca`), 1 fix turu |
+| 2 — Servis yüzeyi (`app.py`) | ✅ complete (`268f3ca..6e5b1d1`), 1 fix turu, 285 passed |
+| 3 — Renderer köprüsü | ✅ complete (`6e5b1d1..066be79`), 1 fix turu (ruling), 70/70 desktop |
+| 4 — Eşleştirme sözleşmesi | ✅ complete (`066be79..a12d332`), fix turu gerekmedi, 287 passed |
+| 5 — Kavram çıkarımı (`rule.py`) | 🔶 kodlandı (`af6ac6e`, 290 passed) — **incelemesi gönderilmedi** |
+| 6-10 | başlanmadı, briefleri hazır |
 
-**Dönüşte ilk komut:** `scripts/review-package <plan> 268f3ca 73ec559` → task reviewer dispatch.
-İncelemeye taşınacak üç açık madde ledger'da yazılı; **en kritiği:** implementer iki mevcut
-testin assertion'larını daralttı (yanıta `text`/`original_name` eklendiği için kırılmışlardı) ve
-"güvenlik amacını koruyarak daralttım" diyor — **bu iddia bağımsız doğrulanmalı.**
+**Yarın ilk komut:** `scripts/review-package <plan> a12d332 af6ac6e` → task reviewer dispatch.
+Sonra Task 6.
+
+### Task 5 — planın DÖRDÜNCÜ kusuru burada çıktı, incelemenin asıl konusu bu
+
+**Brief'in verdiği `_concepts` kodu kendi testini geçmiyor.** Sebep Türkçe'nin fiil-sonu yapısı:
+*"Modeller yaş, cinsiyet ve VKİ **için düzeltildi**"* — kalıp (`düzeltildi`) cümlenin **sonunda**,
+kavramlar ise **öncesinde**. Planın ileriye-bakan kuyruk araması bu cümlede yapısal olarak boş
+döner. İngilizce (`adjusted for X, Y, Z`) ileriye bakar, Türkçe geriye — plan bunu görmemiş.
+
+Implementer'ın çözümü: geriye-doğru span ayrıştırma + cümlenin **öznesini** dışlayan dar, kapalı
+bir stopword listesi (`_ADJUSTMENT_SUBJECT`). Ayrıca brief'in hiç kullanılmayan `_CONNECTORS`
+regex'ini atmış ve `_design`'ın zaten yaptığı `original_text` evidence-offset remap'ini eklemiş
+(brief bunu atlamıştı).
+
+**İncelemede özellikle denetlenecek üç şey:**
+1. **Kalıplar fazla geniş mi?** Plan 1'in ölçülmüş kusuru, geniş kalıbın *başka bir çalışmadan
+   yapılan alıntıyı* makalenin kendi beyanı sanmasıydı.
+   `test_a_sentence_without_a_concept_pattern_yields_nothing` bunun bekçisi.
+2. **Geriye-doğru ayrıştırma + stopword listesi ölçülmemiş bir genellemedir** ve implementer bunu
+   açıkça böyle işaretledi (doğru davranış). Tek bir test cümlesinden genelleme yapıldı; inceleme
+   bu genellemenin nerede yanlış eşleşeceğini aramalı.
+3. **Çıkarım kalitesi ölçülmedi ve bu planda ölçülemez** (gold set Plan 3'te). Kodda, yorumda veya
+   raporda ölçülmemiş doğruluk iddiası varsa bulgu sayılır.
 
 **2. Merge sonrası hâlâ açık:** operatör GUI kabul testi (madde 4/3) koşulmadı.
+
+**2b. Task 6 dispatch'ine taşınacak ertelenmiş bulgu:** `extractors/contracts.py:114`
+`column_summaries` docstring'i `sorted()`'ın **determinizm** gerekçesini taşımıyor. Dict'ler zaten
+ekleme sırasını koruduğu için ileride biri sortu "sadeleştirip" silebilir ve eşitlik bozucu sıra
+sessizce kırılır → aynı girdi farklı plan digest'i verebilir. (Task 5 dispatch'ine de eklendi;
+Task 5 raporu bunu yaptığını söylüyorsa inceleme teyit etsin, yoksa Task 6'ya taşıyın.)
 
 **3. Plan 3'ü yaz** (spec §7-§8): blocking sözlüğü + gold set + ölçüm + `LocalExtractor`.
 Motor seçimi **ölçümsüz yapılmayacak**. Ollama kurulu ve ayakta, **yüklü model yok**
