@@ -152,18 +152,22 @@ def write_pdf_with_text(path: Path, text: str) -> Path:
 
     Uses matplotlib's PDF backend (already a service dependency) with
     pdf.fonttype=42 (TrueType) instead of the default 3 (Type 3), because
-    pypdf often cannot extract text from Type 3 embedded fonts.
+    pypdf often cannot extract text from Type 3 embedded fonts. The rcParam
+    is scoped with matplotlib.rc_context (the same pattern visuals.py uses
+    for svg.hashsalt) so it never leaks into other tests in this process.
     """
     import matplotlib
 
     matplotlib.use("Agg")
-    matplotlib.rcParams["pdf.fonttype"] = 42
     import matplotlib.pyplot as plt
 
     figure = plt.figure()
     figure.text(0.1, 0.5, text)
-    figure.savefig(path, format="pdf")
-    plt.close(figure)
+    try:
+        with matplotlib.rc_context({"pdf.fonttype": 42}):
+            figure.savefig(path, format="pdf")
+    finally:
+        plt.close(figure)
     return path
 
 

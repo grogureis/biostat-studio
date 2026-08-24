@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from docx import Document
+from pypdf import PdfReader
 
 from biostat_service.data_intake import sha256_file
 
@@ -47,8 +48,6 @@ def _read_plain(path: Path) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    from pypdf import PdfReader
-
     reader = PdfReader(str(path))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
