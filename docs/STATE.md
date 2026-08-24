@@ -217,7 +217,27 @@ Aday korpus zaten seçildi ve nitelik kapısından geçti (>2500 karakter, eksik
 `gold_set.json` → `sonraki_korpus_adaylari`. **Etiketlenmedi.** İçinde 3 adet `repeated`
 örneği var — mevcut sette hiç yoktu.
 
-### 1. Metodoloji çıkarımı — Plan 2 ve Plan 3 yazılmadı
+### 1. Metodoloji çıkarımı — **Plan 2 YAZILDI**, Plan 3 yazılmadı
+**Plan 2:** `docs/superpowers/plans/2026-08-24-metodoloji-eslestirme-plan2.md`
+(2026-08-24, oturum 8c · **10 task**, 1611 satır · kodlanmadı, yalnızca yazıldı).
+Kapsam: belgenin projede kalıcılaşması (0d kararı) → kavram çıkarımı → bulanık eşleştirme →
+çelişki tespiti → çelişkinin `planner` ile fiyatlanması → `confirmed` düzeltmesi → onay ekranı.
+LLM **yok** (Plan 3); tek motor `RuleExtractor`. `planner.py` yine değişmiyor.
+
+**Plan yazılırken ölçülen iki kusur** (ikisi de plan taslağındaydı, kod yazılmadan bulundu):
+1. **Planın kendi boşluğu:** ilk taslakta kavram çıkarımı task'ı yoktu. `rule.py:85-91`
+   `extract_brief` yalnızca `design` dolduruyor — `outcome/exposure/covariate_concepts` boş
+   tuple dönüyor. Eşleştirme task'ı boş listeyi eşleştirecekti ve **testleri yeşil geçecekti**
+   ("hiç öneri yok" geçerli bir çıktı). Task 5 olarak eklendi, sonraki tasklar kaydırıldı.
+2. `app.py:28` `MethodologyDocument` ve `MAX_DOCUMENT_CHARS`'ı **import etmiyor**; Task 2 ve 8
+   ikisini de kullanıyor. Plana açık import adımı yazıldı.
+
+**Kalibre edilmemiş sabit:** `MATCH_THRESHOLD = 0.80` (`extractors/matching.py`). `doğrulanmadı`.
+Yanlış olmasının bedeli bilinçli olarak asimetrik: eşiğin altındaki eşleşmeler toplu kabulün
+dışında kalıp kullanıcıya tek tek sorulur → yüksek eşik *daha çok soru*, düşük eşik *sessiz
+yanlış rol*. Yükseğe eğildi. Plan 3 gold set'inden sonra güncellenmeli.
+
+### 1a. (eski madde) Plan 2 ve Plan 3 yazılmadı
 **Plan 2 — Değişken eşleştirme ve çelişki çözümü:** `match_variables`, bulanık sütun eşleştirme,
 çelişki tespiti, `planner.build_plan`'ın iki kez çağrılıp bedelin hesaplanması, `DataIntake.tsx`
 onay bloğu, `confirmed` bayrağının düzeltilmesi (Bulgu A-1). Spec §5-§6.
@@ -308,15 +328,9 @@ Sıralama önerisi: **önce Task 8'in operatör kabul testi** (madde 4) koşulsu
 birleşsin. Gerekçe: kabul testi gerçek bir `.xlsx` ile uçtan uca akışı sınıyor; bu dal o akışın
 girişine yeni bir adım ekliyor. Kabul testi zaten bir kez importta patlamıştı (`01ad68a`).
 
-**2. Plan 2'yi yaz** (`superpowers:writing-plans`, girdi spec §5-§6):
-değişken eşleştirme + çelişki çözümü + `confirmed` bayrağının düzeltilmesi.
-**Başlamadan önce madde 0b'yi okuyun** — özellikle spec §4 Karar B'nin dayanaksız kalmış
-gerekçesini; Plan 2 doküman metnine geri dönüş yolunu kendisi kurmak zorunda.
-**BLOKE DEĞİL ARTIK:** madde **0d** kararı verildi (2026-08-24, Erdem yetkiyi devretti) —
-çıkarılan ham metin proje klasöründe (`source/methodology.txt` + manifest bloğu) yaşar,
-renderer yalnızca proje doğana kadar köprü. Plan 2 buradan başlar.
-Ayrıca madde **0e**: `_validated_roles` ve `_apply_approved_kinds` hazır, Plan 2 onların
-üstüne kurulmalı — yeniden yazmamalı.
+**2. Plan 2'yi ÇALIŞTIR** — plan yazıldı (madde 1), kodlanmadı. Erdem'in vermediği tek karar:
+**subagent-driven mı, inline mı?** Plan 1'in ölçülmüş dersi (aşağıdaki kişisel not) subagent
++ **zorunlu final dal incelemesi** diyor; sekiz task incelemesi iki kusuru kaçırmıştı.
 
 **3. Plan 3'ü yaz** (spec §7-§8): blocking sözlüğü + gold set + ölçüm + `LocalExtractor`.
 Motor seçimi **ölçümsüz yapılmayacak**. Ollama kurulu ve ayakta, **yüklü model yok**
