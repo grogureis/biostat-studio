@@ -1,6 +1,6 @@
 import { useReducer } from "react";
 
-import type { AnalysisPlan, AnalysisResult, Language, StudyBrief } from "../../api/types";
+import type { AnalysisPlan, AnalysisResult, Language, MethodologyExtraction, StudyBrief } from "../../api/types";
 import type { OpenProjectSnapshot } from "../../api/client";
 
 export type WorkflowStep = "study" | "data" | "plan" | "run" | "results" | "report" | "power";
@@ -25,6 +25,7 @@ interface ProjectState {
   plan: AnalysisPlan | null;
   planApproved: boolean;
   results: AnalysisResult[];
+  methodology: MethodologyExtraction | null;
 }
 
 const initialState: ProjectState = {
@@ -36,6 +37,7 @@ const initialState: ProjectState = {
   plan: null,
   planApproved: false,
   results: [],
+  methodology: null,
 };
 
 type Action =
@@ -47,6 +49,7 @@ type Action =
   | { type: "plan"; value: AnalysisPlan | null }
   | { type: "plan_approved"; value: boolean }
   | { type: "results"; value: AnalysisResult[] }
+  | { type: "methodology"; value: MethodologyExtraction | null }
   | { type: "restore"; value: OpenProjectSnapshot };
 
 function clearDependents(state: ProjectState): ProjectState {
@@ -63,6 +66,10 @@ function reducer(state: ProjectState, action: Action): ProjectState {
     case "plan": return { ...state, plan: action.value, planApproved: false, results: [] };
     case "plan_approved": return { ...state, planApproved: action.value };
     case "results": return { ...state, results: action.value };
+    // Deliberately does NOT clearDependents: the document is not a
+    // derivative of the brief (unlike "brief" and "data" above), so it must
+    // survive brief edits made after the document was extracted.
+    case "methodology": return { ...state, methodology: action.value };
     case "restore": return {
       ...state,
       activeStep: action.value.results.length ? "results" : action.value.plan ? "plan" : "data",
@@ -89,6 +96,7 @@ export function useProjectStore() {
     setPlan: (value: AnalysisPlan | null) => dispatch({ type: "plan", value }),
     setPlanApproved: (value: boolean) => dispatch({ type: "plan_approved", value }),
     setResults: (value: AnalysisResult[]) => dispatch({ type: "results", value }),
+    setMethodology: (value: MethodologyExtraction | null) => dispatch({ type: "methodology", value }),
     restoreProject: (value: OpenProjectSnapshot) => dispatch({ type: "restore", value }),
   };
 }

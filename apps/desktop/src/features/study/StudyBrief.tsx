@@ -5,6 +5,12 @@ import { useRef, useState } from "react";
 interface StudyBriefProps {
   value: StudyBriefDto;
   onChange(value: StudyBriefDto): void;
+  // The project this document belongs to does not exist yet — it is only
+  // created later, once the Excel workbook arrives (see DataIntake). Local
+  // `extraction` state below still drives this component's own proposal
+  // badges, but the raw extraction is ALSO reported upward so App.tsx/
+  // store.ts can carry it forward and attach it once the project exists.
+  onMethodology?(value: MethodologyExtraction): void;
   language: "en" | "tr";
   api?: AnalysisApi;
 }
@@ -99,7 +105,7 @@ function parseList(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
-export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) {
+export function StudyBrief({ value, onChange, onMethodology, language, api }: StudyBriefProps) {
   const copy = text[language];
 
   // `update` must write against the CURRENT brief, not the one captured when
@@ -135,6 +141,7 @@ export function StudyBrief({ value, onChange, language, api }: StudyBriefProps) 
       setDocumentName(name);
       const result = await api.extractMethodology();
       setExtraction(result);
+      onMethodology?.(result);
       if (result.brief.design) {
         update("design", result.brief.design.value as StudyDesign);
       }

@@ -84,3 +84,23 @@ it("refuses to read a methodology document through a capability issued for tabul
   })).rejects.toThrow("Invalid path capability");
   expect(request).not.toHaveBeenCalled();
 });
+
+// Task 3: a project may already be open (e.g. reopened from disk) when the
+// user attaches a methodology document to it, distinct from the /v1/projects
+// creation path. This route carries only extracted text, never a filesystem
+// path, so — unlike /v1/projects or /v1/methodology/extract above — it needs
+// no capability injection; the existing source_path/project_root/destination
+// rejection already guards the body.
+it("allows attaching a methodology document to an open project", async () => {
+  const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ attached: true }), { status: 200 }));
+  const proxy = createAuthenticatedApiProxy(
+    () => ({ apiBase: "http://127.0.0.1:4040", token: "secret" }), request,
+  );
+  const uuid = "11111111-1111-4111-8111-111111111111";
+
+  await expect(proxy({
+    method: "POST",
+    path: `/v1/projects/${uuid}/methodology`,
+    body: { text: "Yöntem", source_sha256: "a".repeat(64), source_format: "docx", original_name: "y.docx", char_count: 6, truncated: false },
+  })).resolves.toEqual({ ok: true, status: 200, body: { attached: true } });
+});

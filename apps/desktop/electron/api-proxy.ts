@@ -13,6 +13,10 @@ const API_CAPABILITIES: ReadonlyArray<{ method: ApiRequest["method"]; route: Reg
     route: /^\/v1\/(?:data\/profile|methodology\/extract|projects|projects\/open|plans|plans\/approval|jobs|reports)$/,
   },
   { method: "POST", route: new RegExp(`^/v1/projects/${UUID}/data-approval$`) },
+  // Carries extracted text, not a path, so unlike the routes above it needs
+  // no capability injection — the source_path/project_root/destination
+  // rejection below already keeps a filesystem path out of this body.
+  { method: "POST", route: new RegExp(`^/v1/projects/${UUID}/methodology$`) },
   { method: "GET", route: new RegExp(`^/v1/jobs/${UUID}$`) },
   { method: "POST", route: new RegExp(`^/v1/jobs/${UUID}/cancel$`) },
 ];
