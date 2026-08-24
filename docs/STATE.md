@@ -1,8 +1,41 @@
 # STATE.md — biostat-studio
 
 **Son güncelleme:** 2026-08-24 · oturum `biostat-studio-app-8c`
-**Dal:** `feat/methodology-intake` · son commit `472cb2c` · ayrım noktasından beri **19 commit**
-(`codex/biostat-studio` @ `28af9c9`'dan dallandı; birleştirilmeyi bekliyor)
+**Dal:** `codex/biostat-studio` · `feat/methodology-intake` **BİRLEŞTİRİLDİ** (`9c9f624`, `--no-ff`)
+
+### BİRLEŞTİRME YAPILDI — 2026-08-24, Erdem'in kararı
+22 commit `codex/biostat-studio`'ya girdi. **Push edilmedi.** `origin` hâlâ 2 docs-only commit
+ileride (`6fab78e`, `639e7aa`); push öncesi çekilmeli.
+
+**Açıkça kaydediliyor:** madde 4/3'teki **operatör GUI kabul testi koşulmadan** birleştirildi.
+8c'nin tavsiyesi "önce kabul testi" idi; Erdem birleştirmeyi seçti, tavsiye tekrarlanmayacak.
+**Kabul testi hâlâ açık bir iş** ve şimdi merge edilmiş kod üzerinde koşulacak.
+
+**Merge sonrası kapı seti `[ÖLÇÜM 2026-08-24]`:** 280 Python + 67 desktop passed, `tsc --noEmit`
+temiz, çalışma ağacı temiz, merge çakışmasız.
+
+### ⚠️ venv arızası — ÖLÇÜLDÜ, kısmen çözüldü, kök nedeni açık
+Devir notu *"1b'nin worktree'sindeki venv sağlam"* diyordu. **Değilmiş.** İki ayrı arıza var:
+
+1. **`.worktrees/biostat-studio` venv'i `biostat_service`'i site-packages'a KOPYA olarak
+   kurmuştu** (editable değil). `npm run test:python` kaynak ağacı değil, venv içindeki
+   **eski kopyayı** test ediyordu — yani yeşil sonuçlar yanlış kodu ölçüyordu. Bu, import
+   hatası veren arızadan **daha tehlikeli**: sessizce geçiyor. Kopya kaldırıldı,
+   `pip install -e services/analysis --no-deps` yapıldı.
+2. **Editable kurulum da startup'ta devreye girmiyor** — her iki worktree'de de. Ölçülenler:
+   `.pth` dosyası yerinde ve içeriği doğru (`import ...finder; ...install()`, BOM yok);
+   finder modülü bulunabiliyor; **elle `exec(line)` çalıştırıldığında import çalışıyor**;
+   ama `site` startup'ta bunu uygulamıyor ve hata da yazmıyor. `sys.flags.no_site=0`,
+   `pyvenv.cfg` normal, venv algılanıyor. **Kök neden `doğrulanmadı`** — arama burada
+   bilinçli olarak kesildi, çözüm kablolamadan bağımsız yapıldı.
+
+**Kalıcı çözüm (uygulandı):** `package.json` → `test:python` script'i artık
+`PYTHONPATH=services/analysis` ile başlıyor. `scripts/test-all.sh` bu script'i çağırdığı için
+tam kapı seti de düzeldi. `[ÖLÇÜM: npm run test:python → 280 passed]`
+
+**Yeni bağımlılık uyarısı:** merge `pypdf==5.9.0` getirdi ve mevcut venv'lerde yoktu. Yeni bir
+worktree açan ya da merge çeken herkes **`pip install -r services/analysis/requirements.lock`
+koşmalı** — sürüm kayması istatistik sonuçlarını sessizce değiştiriyor (önceki oturumda ölçüldü).
 
 **Devralma doğrulaması `[ÖLÇÜM 2026-08-24, oturum 8c]`** — devir notundaki iddialar tek tek koşuldu:
 - `PYTHONPATH=services/analysis services/analysis/.venv-py312/bin/python -m pytest services/analysis/tests -q`
