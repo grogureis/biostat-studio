@@ -145,3 +145,32 @@ def test_pdf_is_a_supported_format(tmp_path: Path) -> None:
     from biostat_service.methodology_intake import SUPPORTED_FORMATS
 
     assert "pdf" in SUPPORTED_FORMATS
+
+
+def write_pdf_with_text(path: Path, text: str) -> Path:
+    """Single-page PDF with a genuine, pypdf-extractable text layer.
+
+    Uses matplotlib's PDF backend (already a service dependency) with
+    pdf.fonttype=42 (TrueType) instead of the default 3 (Type 3), because
+    pypdf often cannot extract text from Type 3 embedded fonts.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    import matplotlib.pyplot as plt
+
+    figure = plt.figure()
+    figure.text(0.1, 0.5, text)
+    figure.savefig(path, format="pdf")
+    plt.close(figure)
+    return path
+
+
+def test_pdf_with_text_layer_round_trips_known_text(tmp_path: Path) -> None:
+    path = write_pdf_with_text(tmp_path / "m.pdf", "Retrospective cohort study")
+
+    result = extract_document(path)
+
+    assert result.source_format == "pdf"
+    assert "Retrospective cohort study" in result.text
