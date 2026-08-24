@@ -553,6 +553,10 @@ def append_audit_event(project: LocalProject, event: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+# MethodologyDocument is kept as Any to avoid circular imports: methodology_intake
+# does not import projects at module level today, but if it ever does, a top-level
+# import here would create a circular dependency. This deferred-import pattern is the
+# same rationale as sha256_file inside load_project (line 436).
 def attach_methodology(
     project: LocalProject, document: Any, original_name: str
 ) -> None:
