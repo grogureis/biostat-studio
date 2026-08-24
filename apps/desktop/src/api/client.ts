@@ -1,9 +1,11 @@
-import type { AnalysisPlan, AnalysisResult, DataProfile, Language, PowerRequest, PowerResponse, StudyBrief, VariableRole } from "./types";
+import type { AnalysisPlan, AnalysisResult, DataProfile, Language, MethodologyExtraction, PowerRequest, PowerResponse, StudyBrief, VariableRole } from "./types";
 
 export interface AnalysisApi {
   openProject?(): Promise<OpenProjectSnapshot | null>;
   selectDataFile(): Promise<string | null>;
   profileData?(): Promise<DataProfile>;
+  selectMethodologyDocument?(): Promise<string | null>;
+  extractMethodology?(): Promise<MethodologyExtraction>;
   approveDataStructure(brief: StudyBrief, roles?: VariableRole[]): Promise<void>;
   createPlan(brief: StudyBrief, methodOverrides?: Record<string, string>): Promise<AnalysisPlan>;
   computePower(request: PowerRequest): Promise<PowerResponse>;
@@ -44,7 +46,7 @@ export class AnalysisApiError extends Error {
 
 type BiostatWindowBridge = Pick<
   Window["biostat"],
-  "selectDataFile" | "selectProject" | "selectReportDestination" | "requestApi"
+  "selectDataFile" | "selectMethodologyDocument" | "selectProject" | "selectReportDestination" | "requestApi"
 >;
 
 export interface JobResponse {
@@ -89,6 +91,7 @@ function responseError(body: unknown): AnalysisApiError {
 /** Renderer-safe authenticated boundary for the local loopback service. */
 export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
   let dataFile: Awaited<ReturnType<BiostatWindowBridge["selectDataFile"]>> = null;
+  let methodologyCapability: Awaited<ReturnType<BiostatWindowBridge["selectMethodologyDocument"]>> = null;
   let projectId: string | null = null;
   let activeJobId: string | null = null;
   let completedJobId: string | null = null;
@@ -166,6 +169,28 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
     profileData: async () => {
       if (!dataFile) throw safeError();
       return send<DataProfile>("/v1/data/profile", { source_capability: dataFile.profileCapability });
+    },
+    selectMethodologyDocument: async () => {
+      methodologyCapability = await bridge.selectMethodologyDocument();
+      return methodologyCapability?.displayName ?? null;
+    },
+    extractMethodology: async () => {
+      if (!methodologyCapability) {
+        throw new AnalysisApiError(
+          "methodology_document_not_selected",
+          "Select a methodology document before requesting extraction.",
+        );
+      }
+      // The capability token is single-use and is consumed by the proxy the
+      // moment this request is built, whether extraction ultimately succeeds
+      // or fails. Clear it here too so a second call fails fast, locally,
+      // with a clear error instead of a confusing round trip that is bound
+      // to fail at the proxy because the token is already gone.
+      const capability = methodologyCapability;
+      methodologyCapability = null;
+      return send<MethodologyExtraction>("/v1/methodology/extract", {
+        source_capability: capability.id,
+      });
     },
     approveDataStructure: async (brief: StudyBrief, roles: VariableRole[] = []) => {
       if (!dataFile) throw safeError();

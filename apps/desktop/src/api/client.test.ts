@@ -1,7 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createAnalysisApi } from "./client";
+import { AnalysisApiError, createAnalysisApi } from "./client";
 import type { AnalysisPlan, StudyBrief } from "./types";
+
+const extraction = {
+  source_sha256: "a".repeat(64),
+  source_format: "docx",
+  char_count: 10,
+  truncated: false,
+  warnings: [] as string[],
+  brief: {
+    title: null, question: null, hypothesis: null, design: null,
+    outcome_concepts: [], exposure_concepts: [], covariate_concepts: [], warnings: [],
+  },
+};
 
 const brief: StudyBrief = {
   title: "Comparison",
@@ -27,6 +39,7 @@ describe("authenticated loopback API client", () => {
     const requestApi = vi.fn().mockResolvedValue({ ok: true, status: 200, body: restored });
     const api = createAnalysisApi({
       selectDataFile: vi.fn(),
+      selectMethodologyDocument: vi.fn(),
       selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(), requestApi,
     });
@@ -48,6 +61,7 @@ describe("authenticated loopback API client", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, body: { saved: true, filename: "Results.docx" } });
     const bridge = {
       selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectMethodologyDocument: vi.fn(),
       selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn().mockResolvedValue({ id: "report-cap", displayName: "Results.docx" }),
       requestApi,
@@ -84,6 +98,7 @@ describe("authenticated loopback API client", () => {
       .mockResolvedValueOnce({ ok: true, status: 200, body: plan });
     const bridge = {
       selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectMethodologyDocument: vi.fn(),
       selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(),
       requestApi,
@@ -112,6 +127,7 @@ describe("authenticated loopback API client", () => {
     const requestApi = vi.fn().mockResolvedValue({ ok: true, status: 200, body: { id: "job-1", status: "cancelled", result: null } });
     const api = createAnalysisApi({
       selectDataFile: vi.fn(),
+      selectMethodologyDocument: vi.fn(),
       selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(),
       requestApi,
@@ -132,7 +148,7 @@ describe("authenticated loopback API client", () => {
       polls += 1;
       return polls === 1 ? runningPoll : Promise.resolve({ ok: true, status: 200, body: { id: "job-1", status: "cancelled", progress: 100, result: null } });
     });
-    const api = createAnalysisApi({ selectDataFile: vi.fn(), selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }), selectReportDestination: vi.fn(), requestApi });
+    const api = createAnalysisApi({ selectDataFile: vi.fn(), selectMethodologyDocument: vi.fn(), selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }), selectReportDestination: vi.fn(), requestApi });
 
     await api.openProject!();
     const run = api.runAnalysis(plan);
@@ -163,6 +179,7 @@ describe("authenticated loopback API client", () => {
     });
     const api = createAnalysisApi({
       selectDataFile: vi.fn(),
+      selectMethodologyDocument: vi.fn(),
       selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(),
       requestApi,
@@ -201,6 +218,7 @@ describe("authenticated loopback API client", () => {
       });
       const api = createAnalysisApi({
         selectDataFile: vi.fn(),
+        selectMethodologyDocument: vi.fn(),
         selectProject: vi.fn().mockResolvedValue({ id: "open-cap", displayName: "study.biostat" }),
         selectReportDestination: vi.fn(),
         requestApi,
@@ -237,6 +255,7 @@ describe("authenticated loopback API client", () => {
     });
     const api = createAnalysisApi({
       selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectMethodologyDocument: vi.fn(),
       selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
       selectReportDestination: vi.fn(),
       requestApi,
@@ -250,5 +269,61 @@ describe("authenticated loopback API client", () => {
     await vi.waitFor(() => expect(requestApi).toHaveBeenCalledWith(expect.objectContaining({ path: "/v1/jobs/job-1/cancel" })));
     releasePoll({ ok: true, status: 200, body: { id: "job-1", status: "cancelled", progress: 100, message: null, error_code: null, result: null } });
     await expect(running).rejects.toMatchObject({ code: "cancelled" });
+  });
+
+  it("extracts methodology using the capability issued by the picker, without exposing a path", async () => {
+    const sent: Array<{ path: string; body: unknown }> = [];
+    const requestApi = vi.fn(async (request: { path: string; body?: unknown }) => {
+      sent.push({ path: request.path, body: request.body });
+      return { ok: true, status: 200, body: extraction };
+    });
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn(),
+      selectMethodologyDocument: vi.fn().mockResolvedValue({ id: "cap-1", displayName: "protokol.docx" }),
+      selectProject: vi.fn(),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    });
+
+    const name = await api.selectMethodologyDocument!();
+    const result = await api.extractMethodology!();
+
+    expect(name).toBe("protokol.docx");
+    expect(JSON.stringify(sent)).not.toMatch(/[\\/].*protokol/);
+    expect(sent.at(-1)?.path).toBe("/v1/methodology/extract");
+    expect(sent.at(-1)?.body).toEqual({ source_capability: "cap-1" });
+    expect(result).toEqual(extraction);
+    expect(result.brief.warnings).toEqual([]);
+  });
+
+  it("treats the methodology capability as single-use and rejects a second extraction locally", async () => {
+    const requestApi = vi.fn().mockResolvedValue({ ok: true, status: 200, body: extraction });
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn(),
+      selectMethodologyDocument: vi.fn().mockResolvedValue({ id: "cap-1", displayName: "protokol.docx" }),
+      selectProject: vi.fn(),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    });
+
+    await api.selectMethodologyDocument!();
+    await expect(api.extractMethodology!()).resolves.toEqual(extraction);
+
+    await expect(api.extractMethodology!()).rejects.toBeInstanceOf(AnalysisApiError);
+    expect(requestApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to extract before a methodology document has ever been selected", async () => {
+    const requestApi = vi.fn();
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn(),
+      selectMethodologyDocument: vi.fn(),
+      selectProject: vi.fn(),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    });
+
+    await expect(api.extractMethodology!()).rejects.toBeInstanceOf(AnalysisApiError);
+    expect(requestApi).not.toHaveBeenCalled();
   });
 });
