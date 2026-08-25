@@ -219,9 +219,15 @@ def test_detects_cross_sectional_with_en_dash() -> None:
 
 # --- Task 5: concept extraction (outcome/exposure/covariate). The rule
 # engine leaves a field empty rather than guessing, so the third test below
-# is as load-bearing as the first two: a trigger word that merely APPEARS
-# in a sentence must not be mistaken for the document declaring its own
-# variable.
+# is as load-bearing as the first two: it checks that a sentence carrying
+# NONE of the trigger patterns at all yields nothing. That is NOT the same
+# claim as "a trigger word appearing in a sentence can never be mistaken for
+# the document's own declaration" — a code-review round after this one
+# measured concrete counterexamples (a trigger inside a citation, inside a
+# stated limitation, inside a negated verb) and added guards for those
+# specific, closed cases below; see the "Fix-round" tests further down.
+# Guarding is NOT the same as a general classifier — untested phrasings of
+# citation/negation are still unmeasured and may still false-fire.
 def test_extracts_a_primary_outcome_concept() -> None:
     document = make_document(
         "Yöntem\nBirincil sonlanım 30 günlük mortalite olarak tanımlandı."
@@ -256,3 +262,186 @@ def test_a_sentence_without_a_concept_pattern_yields_nothing() -> None:
 
     assert brief.outcome_concepts == ()
     assert brief.covariate_concepts == ()
+
+
+# --- Fix-round (code review of Task 5). Every fix below is governed by one
+# ruling: when in doubt, emit nothing. A baseline that stays silent is
+# useful; one that invents concepts is worse than none, because a wrong
+# concept sends a variable into the wrong analytical role.
+
+
+# CRITICAL, reviewer-reproduced: `_backward_span` had no bound at all — when
+# no "." or "\n" preceded the trigger anywhere in the text, it fell back to
+# `text[0:match.end()]`. The reviewer's repro: one long, delimiter-free
+# sentence with a recruitment-site list produced 18 "covariates", including
+# city names unrelated to the adjustment clause. Fixed by capping the scan
+# at CONCEPT_MAX_CHARS * 4 chars (same bound the forward branch uses) and
+# returning "" — not a wider fallback — when no delimiter is found inside
+# that bound. The padding below pushes the trigger far enough past the only
+# preceding delimiter ("\n" after "Yöntem") that it falls OUTSIDE the
+# bounded window, so this exercises the "no delimiter inside the bound"
+# branch specifically, not just "the window is smaller than before".
+def test_backward_scan_is_bounded_and_yields_nothing_without_a_delimiter() -> None:
+    cities = ", ".join(
+        [
+            "Ankara", "İzmir", "Bursa", "Antalya", "Konya", "Adana",
+            "Gaziantep", "Mersin", "Kayseri", "Eskişehir", "Diyarbakır",
+            "Samsun", "Denizli", "Şanlıurfa", "Malatya", "Erzurum", "Van",
+            "Bolu", "Trabzon", "Sivas", "Kocaeli", "Manisa", "Aydın",
+            "Balıkesir",
+        ]
+    )
+    text = (
+        f"Yöntem\nKatılımcılar {cities} illerinden çok merkezli olarak "
+        "toplandı ve yaş için düzeltildi."
+    )
+    prefix = text[text.index("Katılımcılar") : text.index("için düzeltildi")]
+    assert len(prefix) > 240, "prefix must exceed the backward-scan bound"
+    document = make_document(text)
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()
+
+
+# IMPORTANT, reviewer-reproduced: `_concepts` had no negative-context guard,
+# so a trigger word inside a CITATION to another study's finding was
+# extracted as this study's own outcome. Same defect class as the citation
+# bug already recorded in the DESIGN_PATTERNS comment (PMC12170779), now
+# measured for concept extraction too. `_sentence_around` cannot be used to
+# check for "ve ark." / "et al." here: the period inside the abbreviation
+# "ark." is itself read as a sentence boundary, so the marker falls OUTSIDE
+# the sentence text `_sentence_around` returns for the trigger appearing
+# later in the same clause — see `_NEGATIVE_CONTEXT_WINDOW`'s comment.
+def test_citation_sentence_does_not_yield_the_cited_studys_outcome() -> None:
+    document = make_document(
+        "Yöntem\nSmith ve ark. çalışmasında birincil sonlanım noktası 90 "
+        "günlük mortalite olarak belirlenmişti. Biz ise hastane içi düşme "
+        "oranını inceledik."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.outcome_concepts == ()
+
+
+# IMPORTANT, reviewer-reproduced: a stated LIMITATION ("...için düzeltme
+# YAPILAMAMIŞ olmasıdır" — adjustment for X could NOT be done) is
+# semantically inverted from an adjustment being performed, but the old
+# code had no way to tell the two apart and extracted a covariate from a
+# sentence saying the opposite. `_NEGATIVE_CONTEXT` catches both the
+# limitation marker ("kısıtlılığı") and the negated verb ("yapılamamış") in
+# this one sentence; either alone would suppress the match.
+def test_stated_limitation_does_not_yield_a_covariate() -> None:
+    document = make_document(
+        "Yöntem\nBu çalışmanın en önemli kısıtlılığı, olası karıştırıcı "
+        "faktörlerin tümü için düzeltme yapılamamış olmasıdır."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()
+
+
+# Not on the reviewer's minimum required list, but confirmed by them as a
+# real false fire — and one already flagged as an unmeasured risk in the
+# original Task 5 report: a BARE adjustment verb with no "için" in front of
+# it describes DATA CLEANING ("veri seti düzeltildi" = the dataset was
+# corrected), not covariate adjustment. Fixed at the trigger itself
+# (_ADJUSTMENT_VERB now requires "için" immediately before the verb) rather
+# than via the negative-context guard, because this sentence carries none
+# of the three closed guard markers — a narrowing of the pattern, not a
+# widening, and one that also fixes it for any other bare-verb sentence,
+# not just this one.
+def test_data_cleaning_sentence_does_not_yield_a_covariate() -> None:
+    document = make_document(
+        "Yöntem\nAykırı değerler saptandıktan sonra veri seti düzeltildi "
+        "ve analiz tekrarlandı."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()
+
+
+# IMPORTANT, reviewer-reproduced: `_TRAILING`'s "olarak\s+\w+" alternative
+# was unanchored, so it fired on the FIRST "olarak <word>" found anywhere in
+# the candidate — here that is the CONNECTOR right after the trigger ("Ana
+# çıktı OLARAK 30 günlük...", meaning "AS the main outcome, ..."), not the
+# trailing "... olarak tanımlandı" clause it was written for. The unanchored
+# version silently deleted "30" from the front of the value. Fixed by
+# anchoring both non-punctuation alternatives to the string's end ($) and
+# adding `_LEADING_SCAFFOLD` to strip the leading connector separately.
+def test_leading_olarak_connector_does_not_swallow_the_number() -> None:
+    document = make_document(
+        "Yöntem\nAna çıktı olarak 30 günlük reamisyon oranı belirlendi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert len(brief.outcome_concepts) == 1
+    assert brief.outcome_concepts[0].value.startswith("30")
+    # NOT asserted: that the trailing bare verb ("belirlendi", with no
+    # "olarak" directly before it) is stripped too — `_TRAILING` only
+    # strips a trailing verb when "olarak" is directly adjacent to it, the
+    # shape test_extracts_a_primary_outcome_concept covers. A closed list
+    # of bare trailing verbs was out of scope for this fix; disclosed, not
+    # silently hidden.
+
+
+# IMPORTANT, reviewer-reproduced: "sonlanım noktası" (endpoint) is a very
+# common three-word variant of "sonlanım" alone; the two-word form used in
+# test_extracts_a_primary_outcome_concept hid this. Without a fix,
+# "noktası" leaks into the front of the extracted value. `_LEADING_SCAFFOLD`
+# strips it as a known scaffold word attached to the trigger, not the
+# concept.
+def test_three_word_sonlanim_noktasi_does_not_leak_noktasi() -> None:
+    document = make_document(
+        "Yöntem\nBirincil sonlanım noktası 30 günlük mortalite olarak "
+        "tanımlandı."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [p.value for p in brief.outcome_concepts] == ["30 günlük mortalite"]
+
+
+# IMPORTANT, reviewer-reproduced: the bare "maruziyet" pattern matched
+# inside the SUFFIXED form "maruziyeti" (stem + possessive/accusative "-i"),
+# ending the match mid-word. The forward span then started on the leftover
+# suffix fragment, producing "i değerlendirildi" as an "exposure concept" —
+# garbage, not silence. Fixed with a `\b` word-boundary requirement right
+# after the stem: "maruziyet" alone (followed by whitespace/punctuation)
+# still fires; "maruziyeti"/"maruziyetin"/etc. now do not fire at all,
+# which is correct here since there is no forward-extractable concept in
+# this sentence anyway (the real subject, "hava kirliliği", precedes the
+# trigger — a backward-word-order case this task does not attempt to
+# solve for `exposure`, unlike it does for `covariate`).
+def test_suffixed_maruziyeti_yields_nothing_rather_than_garbage() -> None:
+    document = make_document("Yöntem\nHava kirliliği maruziyeti değerlendirildi.")
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.exposure_concepts == ()
+
+
+# IMPORTANT, reviewer-reproduced: the old `_ADJUSTMENT_SUBJECT` fix was a
+# CLOSED word list (modeller/model/analizler/analiz); the reviewer pointed
+# out the failure is systematic, not a missing entry, since any subject
+# word leaks the same way. Replaced with a structural rule
+# (`_LEADING_SUBJECT_TOKEN`): drop the first whitespace-separated token of
+# the backward span unconditionally, rather than growing the list forever.
+# "Çalışma" (study) is not in — was never in — any word list, and is
+# correctly dropped anyway.
+def test_adjustment_subject_beyond_the_closed_list_is_still_dropped() -> None:
+    document = make_document(
+        "Yöntem\nÇalışma yaş, cinsiyet ve sigara kullanımı için düzeltildi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [p.value for p in brief.covariate_concepts] == [
+        "yaş",
+        "cinsiyet",
+        "sigara kullanımı",
+    ]
