@@ -73,24 +73,9 @@ DESIGN_PATTERNS: tuple[tuple[str, str], ...] = (
 # şey elemeyen bir güvenlik kapısıdır.
 RULE_CONFIDENCE = 0.7
 
-# Türkçe "X için düzeltildi" (adjusted for X) fiil öbeği. Bir kez tanımlanıp
-# hem CONCEPT_PATTERNS'in covariate alt-kalıbında hem _BACKWARD_TRIGGER'da
-# kullanılıyor — DASH_CLASS'ın DESIGN_PATTERNS'te tekrar kullanılma
-# gerekçesiyle aynı: ikisi birbirinden kayarsa _BACKWARD_TRIGGER.fullmatch
-# sessizce hep False döner ve backward-span hiç çalışmaz.
-#
-# ÖLÇÜLMÜŞ KUSUR (gözden geçirmede bulundu, düzeltildi): önceki kalıp bare
-# "düzeltil(di|erek|miş)" idi — "için" şartı yoktu. "Aykırı değerler
-# saptandıktan sonra veri seti düzeltildi ve analiz tekrarlandı." cümlesinde
-# bu bare fiil ateşleniyordu; ama bu VERİ TEMİZLEME'dir, kovaryat düzeltmesi
-# değil. Gerçek "adjusted for X" deyiminde "için" HER ZAMAN fiilin hemen
-# önünde; bu şart bir DARALTMA (widening değil) ve o cümleyi baştan eler.
-_ADJUSTMENT_VERB = r"i[çc]in\s+d[üu]zeltil(?:di|erek|mi[şs])"
-
 # Kavram kalıpları. Her kalıp, ARDINDAN gelen metnin kavram olduğunu iddia
-# eder — TEK istisnayla, bkz. _BACKWARD_TRIGGER. Kalıplar dar: "sonuç" tek
-# başına yok (Türkçe'de "sonuç olarak" bağlacı her metodoloji metninde geçer
-# ve her seferinde yanlış eşleşirdi).
+# eder. Kalıplar dar: "sonuç" tek başına yok (Türkçe'de "sonuç olarak"
+# bağlacı her metodoloji metninde geçer ve her seferinde yanlış eşleşirdi).
 #
 # `exposure`'daki "maruziyet" artık `\b` ile çıpalı. ÖLÇÜLMÜŞ KUSUR: bare
 # "maruziyet", "maruziyeti"/"maruziyetin" gibi çekimli biçimlerin İÇİNDE de
@@ -102,6 +87,43 @@ _ADJUSTMENT_VERB = r"i[çc]in\s+d[üu]zeltil(?:di|erek|mi[şs])"
 # artık hiç ateşlenmez (sessizlik, çöp değil). Diğer Türkçe kökler
 # (kovaryat, değişken, çıktı) aynı ek-yapışması riskini taşıyabilir ama
 # ÖLÇÜLMEDİ — burada düzeltilmedi, bilinen bir boşluk olarak bırakıldı.
+#
+# TÜRKÇE FİİL-SONU DÜZELTME CÜMLELERİ ("X, Y için düzeltildi" = "adjusted
+# for X, Y") KASITLI OLARAK ÇIKARILMIYOR — bu bir eksiklik/unutma değil,
+# ÖLÇÜLMÜŞ BİR SINIR. Bu yapıda fiil cümle SONUNDA, kavram listesi ÖNÜNDE;
+# doğru çıkarım, Türkçe cümlenin ÖZNESİNİN nerede bitip kavram listesinin
+# nerede başladığını bulmayı gerektiriyor. DÖRT ayrı kural DENENDİ ve
+# HER BİRİ, sıradan bir Türkçe cümlede, YANLIŞ bir kovaryat UYDURDU:
+#   (1) ileri yönlü ayrıştırma (tetikleyiciden SONRAKİ metni oku) — fiil
+#       cümle sonunda olduğu için gerçek listeyi hiç bulamadı.
+#   (2) geriye bakan pencere + kapalı özne sözcüğü listesi
+#       (modeller/model/analizler/analiz) — listenin dışındaki HER özne
+#       sözcüğü sızdı: "Çalışma yaş, ..." → "Çalışma yaş" bir kovaryat
+#       sanıldı.
+#   (3) iki dallı kural (listedeki bir sözcüğü SADECE at, değilse İLK
+#       KALEMİN TAMAMINI at) — Türkçe bileşik özneler TAM DA listedeki
+#       sözcüklerden kurulur: "Model performansı, ..." → "performansı"
+#       bir kovaryat sanıldı; "ve"/"ile" öznenin İÇİNDE de geçebilir:
+#       "Hasta ve hekim değerlendirmesi, ..." → "hekim değerlendirmesi"
+#       uyduruldu.
+#   (4) yalnızca virgüle güvenen kural (ilk virgüle kadar her şeyi at) —
+#       özne + ARA CÜMLE + liste yapısında ("Model, çok değişkenli
+#       lojistik regresyon, yaş ve cinsiyet için düzeltildi.") ara cümle
+#       bir kovaryat sanıldı: "çok değişkenli lojistik regresyon".
+# SONUÇ: bir regex, bir Türkçe cümlede öznenin nerede bittiğini GÜVENİLİR
+# biçimde bulamıyor. Bu motorun kuralı "tahmin etmektense boş bırak"tır
+# (spec §5) — YANLIŞ bir kovaryat, bir değişkeni YANLIŞ analitik role
+# SESSİZCE yönlendirir; bu, hiçbir öneri sunmamaktan DAHA KÖTÜDÜR. Bu
+# yüzden fiil-sonu Türkçe düzeltme cümleleri artık HİÇ EŞLEŞMİYOR:
+# covariate alt-kalıbında "düzeltil-" fiil çekimlerinden hiçbiri yok. İLERİ
+# YÖNLÜ kalıplar (kovaryat, covariates, adjusted for, karıştırıcı,
+# confounder — kavram tetikleyiciden SONRA gelir, İngilizce "adjusted for
+# age, sex" gibi) BU KUSUR SINIFININ DIŞINDA ve ÇALIŞMAYA DEVAM EDİYOR;
+# outcome/exposure kalıpları da bu sınıfın hiç parçası değildi. Bu satırı
+# "düzeltmek" için fiil-sonu kalıbı GERİ EKLEMEYİN — dört mekanizma zaten
+# denendi, dördü de aynı sınıftan bir uydurma üretti (tam geçmiş:
+# git log -- rule.py, commit'ler af6ac6e/9a660b0/fea7992/6c902eb; ölçüm
+# kanıtları task-5-report.md'de).
 CONCEPT_PATTERNS: tuple[tuple[str, str], ...] = (
     (
         "outcome",
@@ -114,17 +136,10 @@ CONCEPT_PATTERNS: tuple[tuple[str, str], ...] = (
     ),
     (
         "covariate",
-        rf"kovaryat|covariates?|{_ADJUSTMENT_VERB}"
-        r"|adjusted\s+for|kar[ıi][şs]t[ıi]r[ıi]c[ıi]|confounder",
+        r"kovaryat|covariates?|adjusted\s+for"
+        r"|kar[ıi][şs]t[ıi]r[ıi]c[ıi]|confounder",
     ),
 )
-
-# Bu tek alt-kalıp eşleştiğinde kavram listesi eşleşmenin ÖNÜNDE yer alır:
-# Türkçe "yaş, cinsiyet için düzeltildi" = "adjusted for age, sex", ama fiil
-# cümlenin SONUNDA. CONCEPT_PATTERNS'teki her diğer tetikleyici (kovaryat,
-# covariates, adjusted for, karıştırıcı, confounder, birincil sonlanım,
-# maruziyet, ...) ileriye bakar; yalnızca bu fiil öbeği geriye bakar.
-_BACKWARD_TRIGGER = re.compile(_ADJUSTMENT_VERB, re.IGNORECASE)
 
 # Bilinen kusur sınıflarına karşı dar bir olumsuz-bağlam kapısı — genel bir
 # sınıflandırıcı DEĞİL. Eşleşmenin çevresindeki pencerede (bkz.
@@ -177,24 +192,6 @@ _NEGATIVE_CONTEXT = re.compile(
 # (sessiz kalmak) yanlış çıkarmaktan daha güvenli bir hata modudur —
 # spec §5'in "tahmin etmektense boş bırak" kuralı.
 _NEGATIVE_CONTEXT_WINDOW = 200
-
-# Geriye bakan ayrıştırmada ilk kalemin önündeki cümle öznesini nasıl
-# ele aldığımız İKİ tur boyunca değişti, ikisinde de bir değer UYDURDU:
-#   - Tur 1: yapısal kural ("iki+ boşlukla ayrılmış sözcük görürsen ilkini
-#     at") — "Vücut kitle indeksi, ..." içindeki "Vücut"u attı ve var
-#     OLMAYAN "kitle indeksi" terimini uydurdu.
-#   - Tur 2: kapalı özne-sözcüğü listesi + "listede değilse ilk KALEMİN
-#     TAMAMINI at" — "Model performansı, ..." içinde "Model" listedeydi,
-#     yalnızca o atıldı ve "performansı" bir kovaryat sanıldı (Türkçe
-#     bileşik özneler TAM DA bu tür sözcüklerden kurulur); "değilse" dalı
-#     da "ve"/"ile"yi özne sınırı sanarak "Hasta ve hekim değerlendirmesi,
-#     ..." içinde özneNİN İÇİNDEKİ "ve"de durup "hekim değerlendirmesi"yi
-#     uydurdu.
-# Sonuç: bir regex'in bir Türkçe öznenin nerede bittiğini bulması mümkün
-# değil — bileşik özneler, "ve"/"ile" ile bağlanan özneler, iyelik ekleri;
-# denenen HER kural kendi karşı-örneğini üretti. Tur 3 artık öznenin
-# nerede bittiğini BULMAYA çalışmıyor — bkz. `_backward_span` içindeki
-# "TRUST ONLY THE COMMA" yorumu.
 
 # İleri yönlü ayrıştırmada, tetikleyiciden HEMEN sonra gelen ve kavramın
 # kendisi OLMAYAN iskele sözcüklerini atar. ÖLÇÜLMÜŞ İKİ KUSUR:
@@ -311,15 +308,19 @@ class RuleExtractor:
     ) -> tuple[Proposal, ...]:
         """Extract concept names anchored to one trigger pattern, or nothing.
 
-        Every trigger in `pattern` places its concept AFTER itself, except
-        the Turkish adjustment-verb alternative ("için düzeltildi" /
-        "düzeltilerek" / "düzeltilmiş"), whose covariate list sits BEFORE
-        it — see `_BACKWARD_TRIGGER`. A match whose surrounding text carries
-        a known false-fire marker (`_NEGATIVE_CONTEXT`) is skipped entirely
-        before any candidate is built. A trigger that fires but yields no
-        candidate inside CONCEPT_MIN/MAX_CHARS contributes nothing: this is
-        the "leave it empty rather than guess" rule applied per-candidate,
-        not just per-match.
+        Every trigger in `pattern` reads its concept from the text AFTER
+        the match. (An earlier version also read BACKWARD, from a Turkish
+        verb-final adjustment trigger such as "için düzeltildi" — that
+        path was removed after four different rules for locating where a
+        Turkish subject ends each measurably invented a wrong covariate;
+        see the comment on CONCEPT_PATTERNS for the full account. Do not
+        re-add backward reading without reading that comment first.) A
+        match whose surrounding text carries a known false-fire marker
+        (`_NEGATIVE_CONTEXT`) is skipped entirely before any candidate is
+        built. A trigger that fires but yields no candidate inside
+        CONCEPT_MIN/MAX_CHARS contributes nothing: this is the "leave it
+        empty rather than guess" rule applied per-candidate, not just
+        per-match.
         """
         found: list[Proposal] = []
         seen: set[str] = set()
@@ -335,12 +336,9 @@ class RuleExtractor:
             located = original_text.find(sentence)
             evidence_offset = located if located >= 0 else None
 
-            if _BACKWARD_TRIGGER.fullmatch(match.group()):
-                span = self._backward_span(text, match)
-            else:
-                span = text[match.end() : match.end() + CONCEPT_MAX_CHARS * 4]
-                span = span.split(".")[0]
-                span = _LEADING_SCAFFOLD.sub("", span, count=1)
+            span = text[match.end() : match.end() + CONCEPT_MAX_CHARS * 4]
+            span = span.split(".")[0]
+            span = _LEADING_SCAFFOLD.sub("", span, count=1)
 
             for raw in _SPLIT.split(span):
                 candidate = _TRAILING.sub("", raw).strip(" \t:,–—-")
@@ -372,76 +370,6 @@ class RuleExtractor:
         window_start = max(0, match.start() - _NEGATIVE_CONTEXT_WINDOW)
         window_end = min(len(text), match.end() + _NEGATIVE_CONTEXT_WINDOW)
         return _NEGATIVE_CONTEXT.search(text[window_start:window_end]) is not None
-
-    @staticmethod
-    def _backward_span(text: str, match: re.Match[str]) -> str:
-        """The text preceding a backward trigger, back to the last sentence delimiter.
-
-        Bounded the same way `_sentence_around` and the forward branch are
-        (at most CONCEPT_MAX_CHARS * 4 characters back). CRITICAL, MEASURED
-        DEFECT — now fixed: the previous version had NO bound at all; when
-        no "." or "\\n" preceded the trigger anywhere in the text, it fell
-        back to `text[0:match.end()]`. Reproduced: one long sentence with
-        several comma lists and no preceding period yielded 18 covariate
-        candidates, including city names nowhere near the adjustment
-        clause. Per this round's ruling — when in doubt, emit nothing — a
-        missing delimiter inside the bound now returns "" rather than
-        falling back to ANY wider window, bounded or not.
-
-        Round 3 of the code review replaced the leading-subject handling
-        entirely — see the "TRUST ONLY THE COMMA" comment below. Two
-        prior attempts (a closed subject-word list, then a two-branch
-        word-list-or-discard-whole-item rule) each MEASURABLY invented a
-        wrong value on some ordinary Turkish sentence. This version
-        cannot invent one: it never guesses where a subject ends, because
-        it never tries to identify a subject at all.
-        """
-        window_floor = max(0, match.start() - CONCEPT_MAX_CHARS * 4)
-        window_start = max(
-            text.rfind(".", window_floor, match.start()),
-            text.rfind("\n", window_floor, match.start()),
-        )
-        if window_start < 0:
-            return ""
-        span = text[window_start + 1 : match.end()]
-
-        # TRUST ONLY THE COMMA. Round 3, MEASURED: both prior mechanisms
-        # for locating the covariate list's start invented a value.
-        # (1) A closed subject-word list only strips the head word, but
-        #     Turkish compound subjects are built from exactly those
-        #     words: "Model performansı, ..." stripped "Model" and kept
-        #     "performansı" as if it were a covariate.
-        # (2) Falling back to "ve"/"ile" as a subject-boundary signal
-        #     stops wherever one of THOSE words appears, even inside the
-        #     subject itself: "Hasta ve hekim değerlendirmesi, yaş..."
-        #     split on the first "ve" and kept "hekim değerlendirmesi" —
-        #     part of the subject, not a covariate.
-        # A regex cannot find where a Turkish subject ends: compound
-        # subjects, subjects joined by "ve"/"ile", possessive suffixes —
-        # every rule tried here has its own counterexample. So this
-        # version does not try. It trusts exactly one signal: a comma.
-        # Everything up to and including the FIRST comma is discarded
-        # unconditionally (subject or not — this version does not know
-        # or care which), and the items after it are read normally. If
-        # there is no comma in the span, there is no reliable signal for
-        # where the list starts, so nothing is emitted.
-        #
-        # KNOWN, DELIBERATE LOSSES — do not "fix" these by restoring a
-        # subject-detection mechanism; every one tried so far invented a
-        # wrong value instead:
-        #   - "Yaş, cinsiyet ve BKİ için düzeltildi." (no subject at all)
-        #     loses "yaş" — the first item is ALWAYS discarded, even when
-        #     there was nothing to discard it for.
-        #   - "Analiz sonuçları yaş ve cinsiyet için düzeltildi." (no
-        #     comma anywhere) yields NOTHING, even though "yaş" and
-        #     "cinsiyet" are real covariates two words later.
-        # Accepted per this round's ruling: a lost concept is visible and
-        # cheap (the user is asked about the column); an invented one
-        # silently routes a variable into the wrong analysis.
-        comma = span.find(",")
-        if comma == -1:
-            return ""
-        return span[comma + 1 :]
 
     @staticmethod
     def _sentence_around(text: str, index: int) -> str:

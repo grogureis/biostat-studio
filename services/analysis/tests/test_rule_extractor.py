@@ -241,27 +241,6 @@ def test_extracts_a_primary_outcome_concept() -> None:
     assert brief.outcome_concepts[0].evidence is not None
 
 
-# --- Round 3 (code review): "Modeller " used to be stripped off this
-# sentence by name (round 1's word-drop, round 2's closed-list check), so
-# "yaş" survived. Round 3 retired all subject-word detection — see the
-# "Fix-round 3" tests further down for why — and now trusts only the
-# first comma: everything up to and including it is discarded, whether or
-# not it was a "subject". "Modeller yaş" (no comma between the two words)
-# is one unbroken run before the first comma here, so BOTH are dropped
-# together; only "cinsiyet" and "vücut kitle indeksi" (which come after
-# that comma) survive. This is the accepted, deliberate trade — see
-# rule.py's "TRUST ONLY THE COMMA" comment on `_backward_span`.
-def test_extracts_a_covariate_list() -> None:
-    document = make_document(
-        "Yöntem\nModeller yaş, cinsiyet ve vücut kitle indeksi için düzeltildi."
-    )
-
-    brief = RuleExtractor().extract_brief(document)
-
-    assert [proposal.value for proposal in brief.covariate_concepts] == [
-        "cinsiyet",
-        "vücut kitle indeksi",
-    ]
 
 
 def test_a_sentence_without_a_concept_pattern_yields_nothing() -> None:
@@ -277,40 +256,6 @@ def test_a_sentence_without_a_concept_pattern_yields_nothing() -> None:
 # ruling: when in doubt, emit nothing. A baseline that stays silent is
 # useful; one that invents concepts is worse than none, because a wrong
 # concept sends a variable into the wrong analytical role.
-
-
-# CRITICAL, reviewer-reproduced: `_backward_span` had no bound at all — when
-# no "." or "\n" preceded the trigger anywhere in the text, it fell back to
-# `text[0:match.end()]`. The reviewer's repro: one long, delimiter-free
-# sentence with a recruitment-site list produced 18 "covariates", including
-# city names unrelated to the adjustment clause. Fixed by capping the scan
-# at CONCEPT_MAX_CHARS * 4 chars (same bound the forward branch uses) and
-# returning "" — not a wider fallback — when no delimiter is found inside
-# that bound. The padding below pushes the trigger far enough past the only
-# preceding delimiter ("\n" after "Yöntem") that it falls OUTSIDE the
-# bounded window, so this exercises the "no delimiter inside the bound"
-# branch specifically, not just "the window is smaller than before".
-def test_backward_scan_is_bounded_and_yields_nothing_without_a_delimiter() -> None:
-    cities = ", ".join(
-        [
-            "Ankara", "İzmir", "Bursa", "Antalya", "Konya", "Adana",
-            "Gaziantep", "Mersin", "Kayseri", "Eskişehir", "Diyarbakır",
-            "Samsun", "Denizli", "Şanlıurfa", "Malatya", "Erzurum", "Van",
-            "Bolu", "Trabzon", "Sivas", "Kocaeli", "Manisa", "Aydın",
-            "Balıkesir",
-        ]
-    )
-    text = (
-        f"Yöntem\nKatılımcılar {cities} illerinden çok merkezli olarak "
-        "toplandı ve yaş için düzeltildi."
-    )
-    prefix = text[text.index("Katılımcılar") : text.index("için düzeltildi")]
-    assert len(prefix) > 240, "prefix must exceed the backward-scan bound"
-    document = make_document(text)
-
-    brief = RuleExtractor().extract_brief(document)
-
-    assert brief.covariate_concepts == ()
 
 
 # IMPORTANT, reviewer-reproduced: `_concepts` had no negative-context guard,
@@ -340,32 +285,14 @@ def test_citation_sentence_does_not_yield_the_cited_studys_outcome() -> None:
 # code had no way to tell the two apart and extracted a covariate from a
 # sentence saying the opposite. `_NEGATIVE_CONTEXT` catches both the
 # limitation marker ("kısıtlılığı") and the negated verb ("yapılamamış") in
-# this one sentence; either alone would suppress the match.
+# this one sentence; either alone would suppress the match. This test
+# exercises the FORWARD covariate trigger "karıştırıcı" and the
+# negative-context guard, both untouched by the round-4 removal below —
+# see that section's intro comment for what forward/backward means here.
 def test_stated_limitation_does_not_yield_a_covariate() -> None:
     document = make_document(
         "Yöntem\nBu çalışmanın en önemli kısıtlılığı, olası karıştırıcı "
         "faktörlerin tümü için düzeltme yapılamamış olmasıdır."
-    )
-
-    brief = RuleExtractor().extract_brief(document)
-
-    assert brief.covariate_concepts == ()
-
-
-# Not on the reviewer's minimum required list, but confirmed by them as a
-# real false fire — and one already flagged as an unmeasured risk in the
-# original Task 5 report: a BARE adjustment verb with no "için" in front of
-# it describes DATA CLEANING ("veri seti düzeltildi" = the dataset was
-# corrected), not covariate adjustment. Fixed at the trigger itself
-# (_ADJUSTMENT_VERB now requires "için" immediately before the verb) rather
-# than via the negative-context guard, because this sentence carries none
-# of the three closed guard markers — a narrowing of the pattern, not a
-# widening, and one that also fixes it for any other bare-verb sentence,
-# not just this one.
-def test_data_cleaning_sentence_does_not_yield_a_covariate() -> None:
-    document = make_document(
-        "Yöntem\nAykırı değerler saptandıktan sonra veri seti düzeltildi "
-        "ve analiz tekrarlandı."
     )
 
     brief = RuleExtractor().extract_brief(document)
@@ -424,75 +351,13 @@ def test_three_word_sonlanim_noktasi_does_not_leak_noktasi() -> None:
 # still fires; "maruziyeti"/"maruziyetin"/etc. now do not fire at all,
 # which is correct here since there is no forward-extractable concept in
 # this sentence anyway (the real subject, "hava kirliliği", precedes the
-# trigger — a backward-word-order case this task does not attempt to
-# solve for `exposure`, unlike it does for `covariate`).
+# trigger).
 def test_suffixed_maruziyeti_yields_nothing_rather_than_garbage() -> None:
     document = make_document("Yöntem\nHava kirliliği maruziyeti değerlendirildi.")
 
     brief = RuleExtractor().extract_brief(document)
 
     assert brief.exposure_concepts == ()
-
-
-# IMPORTANT, reviewer-reproduced (round 1), superseded (round 3). History,
-# not current design: round 1's fix here was a structural rule (drop the
-# span's first token unconditionally); round 2 replaced it with a closed
-# subject-word list + a "discard the whole first item if unrecognized"
-# fallback (`_ADJUSTMENT_SUBJECT_WORDS` / `_drop_leading_subject`) — under
-# that version "Çalışma" was IN the recognized list, so only "Çalışma" was
-# stripped and "yaş" survived as the first item. Round 3 retired the whole
-# subject-word-list mechanism (see the "Fix-round 3" tests below for why —
-# it invented values on other sentences) and now trusts only the first
-# comma, regardless of what precedes it. "Çalışma yaş" (no comma between
-# them) is now ONE unbroken run before the first comma, so both are
-# dropped together — the SAME trade as
-# test_extracts_a_covariate_list above, not a special case for this
-# sentence anymore.
-def test_adjustment_subject_beyond_the_closed_list_is_still_dropped() -> None:
-    document = make_document(
-        "Yöntem\nÇalışma yaş, cinsiyet ve sigara kullanımı için düzeltildi."
-    )
-
-    brief = RuleExtractor().extract_brief(document)
-
-    assert [p.value for p in brief.covariate_concepts] == [
-        "cinsiyet",
-        "sigara kullanımı",
-    ]
-
-
-# --- Fix-round 2 (code review of the round-1 fixes). Both residuals below
-# were things already flagged as unmeasured risk in the round-1 report;
-# the re-reviewer's own probe sentences measured them. Governing ruling is
-# unchanged: when in doubt, emit nothing.
-
-
-# IMPORTANT, re-reviewer-reproduced (round 2), superseded (round 3).
-# History, not current design: round 1's `_LEADING_SUBJECT_TOKEN` dropped
-# the backward span's first whitespace-separated token UNCONDITIONALLY —
-# "Vücut kitle indeksi" (BMI) has the identical surface shape as "Çalışma
-# yaş" (both whitespace-joined words, no comma before the next delimiter),
-# so it got severed mid-term into ['kitle indeksi', 'yaş', 'cinsiyet'] —
-# "kitle indeksi" is not a term that exists. Round 2's fix
-# (`_drop_leading_subject`, a closed subject list + "discard the whole
-# first item if unrecognized") got THIS sentence right, by design, because
-# "Vücut" was never in the subject list, so it took the discard-whole-item
-# branch. Round 3 retired that mechanism too (see the "Fix-round 3" tests
-# below — the two-branch version invented values on OTHER sentences, e.g.
-# subjects built from a recognized word: "Model performansı, ..."). The
-# assertion below is UNCHANGED by round 3, not because the same reasoning
-# still applies, but because round 3's simpler rule (discard up to and
-# including the first comma) happens to land on the same split for this
-# specific sentence: the first comma is right after "indeksi" either way.
-def test_unrecognized_leading_word_drops_the_whole_first_item_not_just_the_word() -> None:
-    document = make_document(
-        "Yöntem\nVücut kitle indeksi, yaş ve cinsiyet için düzeltildi."
-    )
-
-    brief = RuleExtractor().extract_brief(document)
-
-    assert [p.value for p in brief.covariate_concepts] == ["yaş", "cinsiyet"]
-    assert "kitle indeksi" not in [p.value for p in brief.covariate_concepts]
 
 
 # IMPORTANT, re-reviewer-reproduced: round 1's `_NEGATIVE_CONTEXT` caught
@@ -506,7 +371,9 @@ def test_unrecognized_leading_word_drops_the_whole_first_item_not_just_the_word(
 # negation, was extracted as one garbage "covariate". Fixed by replacing
 # the substring list with a stem+suffix pattern (yapıl-/edil-/düzeltil- +
 # either negation form + either past-tense ending) — kept to those three
-# stems, not generalized to all Turkish verbs.
+# stems, not generalized to all Turkish verbs. This test exercises the
+# FORWARD covariate trigger "karıştırıcı", untouched by the round-4
+# removal below.
 def test_yapilmadi_negation_does_not_yield_a_covariate() -> None:
     document = make_document(
         "Yöntem\nYaş, cinsiyet ve BKİ potansiyel karıştırıcı faktörlerdi "
@@ -518,25 +385,94 @@ def test_yapilmadi_negation_does_not_yield_a_covariate() -> None:
     assert brief.covariate_concepts == ()
 
 
-# --- Fix-round 3 (code review of the round-2 fix). This is the THIRD round
-# on the same defect class (locating where a Turkish subject ends before a
-# backward-parsed covariate list). Rounds 1 and 2 each replaced the prior
-# mechanism with a new one that measurably invented a wrong value on some
-# ordinary sentence. The conclusion this round: a regex cannot find where
-# a Turkish subject ends — compound subjects, subjects joined by
-# "ve"/"ile", possessive suffixes each defeated a different rule. Round 3
-# stops trying to identify a subject at all and trusts exactly one signal:
-# a comma. See rule.py's "TRUST ONLY THE COMMA" comment on
-# `_backward_span` for the mechanism and what it knowingly loses.
+# --- Fix-round 4 (code review of the round-3 fix): the verb-final backward
+# covariate path is REMOVED, not patched a fifth time.
+#
+# Rounds 1-3 each replaced the previous mechanism for locating where a
+# Turkish subject ends before a backward-parsed covariate list (a bounded
+# window, a closed subject-word list, a structural first-token drop, a
+# two-branch subject rule, a comma-only rule — four distinct mechanisms
+# across those rounds; see rule.py's CONCEPT_PATTERNS comment for the full
+# account with all four counterexamples). Round 3's own author, probing the
+# comma-only rule before reporting it done, found a FIFTH counterexample —
+# a multi-comma appositive ("Model, çok değişkenli lojistik regresyon, yaş
+# ve cinsiyet için düzeltildi.") that invents "çok değişkenli lojistik
+# regresyon" as a covariate — and stopped instead of patching around it, as
+# instructed. The conclusion: a regex cannot reliably find where a Turkish
+# subject ends. The verb-final trigger ("X, Y için düzeltildi") is deleted
+# from CONCEPT_PATTERNS entirely; `_backward_span` and the backward/forward
+# branch in `_concepts` are deleted with it.
+#
+# This is NOT the removal of covariate extraction. Every FORWARD covariate
+# trigger — where the concept follows the trigger rather than precedes it —
+# is untouched and still works: "kovaryat", "covariates", "adjusted for",
+# "karıştırıcı", "confounder" (see test_stated_limitation_does_not_yield_a_
+# covariate and test_yapilmadi_negation_does_not_yield_a_covariate above,
+# both still exercising a forward trigger + the negative-context guard).
+# outcome_concepts and exposure_concepts were never part of this defect
+# class either.
+#
+# The tests below convert six historical counterexamples (rounds 1-3's
+# findings, plus the multi-comma appositive that ended the attempt) into
+# regression pins for the new silence. If a future change starts extracting
+# from a verb-final sentence again, one of these should fail and force that
+# change through review rather than landing quietly.
 
 
-def test_recognized_subject_word_no_longer_gets_special_treatment() -> None:
-    """"Model" was in round 2's closed subject-word list; that mechanism
-    is gone. Turkish compound subjects are built from exactly those
-    recognized words ("Model performansı" = "the model's performance"),
-    so stripping only the head word used to leave "performansı" behind as
-    an invented covariate. Trusting only the comma drops "Model
-    performansı" as one unit instead.
+def test_verb_final_covariate_list_yields_nothing() -> None:
+    """Was test_extracts_a_covariate_list (Task 5's original positive
+    test) through round 3, where it asserted ["cinsiyet", "vücut kitle
+    indeksi"] — round 3's comma-only rule dropping "Modeller yaş" as one
+    unbroken run before the first comma. Round 4 removes the verb-final
+    path entirely, so this sentence now yields nothing at all.
+    """
+    document = make_document(
+        "Yöntem\nModeller yaş, cinsiyet ve vücut kitle indeksi için düzeltildi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()
+
+
+def test_verb_final_with_unlisted_subject_yields_nothing() -> None:
+    """Was test_adjustment_subject_beyond_the_closed_list_is_still_dropped
+    (round 1), which pinned that an unlisted subject word ("Çalışma") did
+    not get special leniency. That distinction no longer exists — no
+    subject word, listed or not, is ever stripped, because the whole
+    verb-final trigger no longer matches.
+    """
+    document = make_document(
+        "Yöntem\nÇalışma yaş, cinsiyet ve sigara kullanımı için düzeltildi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()
+
+
+def test_verb_final_with_compound_first_item_yields_nothing() -> None:
+    """Was test_unrecognized_leading_word_drops_the_whole_first_item_not_
+    just_the_word (round 2): "vücut kitle indeksi" (BMI) as the first,
+    comma-free item. Round 1's unconditional first-token drop severed it
+    into the invented term "kitle indeksi" — the defect that started this
+    whole chain of fixes. Now the sentence yields nothing, so there is
+    nothing left to sever.
+    """
+    document = make_document(
+        "Yöntem\nVücut kitle indeksi, yaş ve cinsiyet için düzeltildi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()
+
+
+def test_verb_final_with_recognized_subject_word_yields_nothing() -> None:
+    """Was test_recognized_subject_word_no_longer_gets_special_treatment
+    (round 3): "Model" was in round 2's closed subject-word list, so only
+    "Model" got stripped and "performansı" (part of the same compound
+    subject, "the model's performance") was kept as an invented covariate.
     """
     document = make_document(
         "Yöntem\nModel performansı, yaş ve cinsiyet için düzeltildi."
@@ -544,18 +480,16 @@ def test_recognized_subject_word_no_longer_gets_special_treatment() -> None:
 
     brief = RuleExtractor().extract_brief(document)
 
-    assert [p.value for p in brief.covariate_concepts] == ["yaş", "cinsiyet"]
-    assert "performansı" not in [p.value for p in brief.covariate_concepts]
+    assert brief.covariate_concepts == ()
 
 
-def test_ve_joined_subject_is_not_mistaken_for_the_item_boundary() -> None:
-    """Round 2's discard-whole-item branch fell back to `_SPLIT` (comma OR
-    "ve"/"and"/"ile") to find where the unrecognized-subject item ends —
-    but "ve"/"ile" can appear INSIDE the subject itself ("Hasta ve hekim
-    değerlendirmesi" = "the patient's and physician's assessment"), so it
-    stopped mid-subject and kept "hekim değerlendirmesi" as an invented
-    covariate. Trusting only the comma is immune to this: "ve"/"ile"
-    inside the subject are not commas, so they no longer end anything.
+def test_verb_final_with_ve_joined_subject_yields_nothing() -> None:
+    """Was test_ve_joined_subject_is_not_mistaken_for_the_item_boundary
+    (round 3): round 2's discard-whole-item branch fell back to "ve"/"ile"
+    to find the item boundary, but those words can appear INSIDE the
+    subject itself ("Hasta ve hekim değerlendirmesi" = "the patient's and
+    physician's assessment"), so it stopped mid-subject and invented
+    "hekim değerlendirmesi" as a covariate.
     """
     document = make_document(
         "Yöntem\nHasta ve hekim değerlendirmesi, yaş ve cinsiyet için "
@@ -564,41 +498,45 @@ def test_ve_joined_subject_is_not_mistaken_for_the_item_boundary() -> None:
 
     brief = RuleExtractor().extract_brief(document)
 
-    assert [p.value for p in brief.covariate_concepts] == ["yaş", "cinsiyet"]
+    assert brief.covariate_concepts == ()
 
 
-def test_comma_free_covariate_sentence_yields_nothing() -> None:
-    """KNOWN, DELIBERATE LOSS — do not "fix" this by restoring a
-    subject-detection mechanism; every one tried so far invented a wrong
-    value instead (see the two tests above and the round-1/round-2 tests
-    superseded by this round). With no comma anywhere in the span, there
-    is no reliable signal for where the covariate list starts, so this
-    engine emits NOTHING rather than guess — even though "yaş" and
-    "cinsiyet" are real covariates two words later. A lost concept is
-    visible and cheap (the user is asked about the column); this task's
-    governing rule treats that as strictly better than the alternative.
+def test_verb_final_with_no_subject_yields_nothing() -> None:
+    """Was test_first_item_before_the_first_comma_is_always_lost_even_
+    with_no_subject (round 3): round 3's comma-only rule always discarded
+    the text before the first comma, even here where there was no subject
+    at all and "yaş" was a real, standalone covariate — a known, disclosed
+    loss at the time. Round 4 makes the whole sentence yield nothing
+    rather than just its first item.
     """
-    document = make_document(
-        "Yöntem\nAnaliz sonuçları yaş ve cinsiyet için düzeltildi."
-    )
+    document = make_document("Yöntem\nYaş, cinsiyet ve BKİ için düzeltildi.")
 
     brief = RuleExtractor().extract_brief(document)
 
     assert brief.covariate_concepts == ()
 
 
-def test_first_item_before_the_first_comma_is_always_lost_even_with_no_subject() -> None:
-    """KNOWN, DELIBERATE LOSS — this is the direct cost of trusting only
-    the comma: the rule does not know whether the text before the first
-    comma is a subject or a genuine first covariate, so it ALWAYS
-    discards it, even here where there was no subject at all and "yaş"
-    was a real, standalone covariate. Do not "fix" this by trying to
-    detect whether a subject is present — that detection is exactly what
-    invented values in rounds 1 and 2.
+def test_verb_final_with_appositive_after_subject_yields_nothing() -> None:
+    """THE finding that ended the four-round attempt: round 3's own
+    author probed the comma-only rule (per explicit instruction, before
+    declaring it done) and found that a comma-separated appositive right
+    after the subject — "Model, [çok değişkenli lojistik regresyon],
+    yaş ve cinsiyet için düzeltildi." — got the FIRST comma right but not
+    the SECOND: "çok değişkenli lojistik regresyon" (describing the model
+    type, not a covariate) was invented as one. Reported instead of
+    patched, per instruction: "a measured 'the rule engine cannot do
+    this' is worth more than a fourth patch." This is the sentence that
+    made the removal decision, not just one more counterexample among the
+    others in this section.
     """
-    document = make_document("Yöntem\nYaş, cinsiyet ve BKİ için düzeltildi.")
+    document = make_document(
+        "Yöntem\nModel, çok değişkenli lojistik regresyon, yaş ve cinsiyet "
+        "için düzeltildi."
+    )
 
     brief = RuleExtractor().extract_brief(document)
 
-    assert [p.value for p in brief.covariate_concepts] == ["cinsiyet", "BKİ"]
-    assert "yaş" not in [p.value for p in brief.covariate_concepts]
+    assert brief.covariate_concepts == ()
+    assert "çok değişkenli lojistik regresyon" not in [
+        p.value for p in brief.covariate_concepts
+    ]
