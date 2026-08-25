@@ -425,14 +425,18 @@ def test_suffixed_maruziyeti_yields_nothing_rather_than_garbage() -> None:
     assert brief.exposure_concepts == ()
 
 
-# IMPORTANT, reviewer-reproduced: the old `_ADJUSTMENT_SUBJECT` fix was a
-# CLOSED word list (modeller/model/analizler/analiz); the reviewer pointed
-# out the failure is systematic, not a missing entry, since any subject
-# word leaks the same way. Replaced with a structural rule
-# (`_LEADING_SUBJECT_TOKEN`): drop the first whitespace-separated token of
-# the backward span unconditionally, rather than growing the list forever.
-# "Çalışma" (study) is not in — was never in — any word list, and is
-# correctly dropped anyway.
+# IMPORTANT, reviewer-reproduced (round 1). Round 1's fix for this was a
+# STRUCTURAL rule (drop the backward span's first whitespace-separated
+# token unconditionally, no subject check at all) rather than the original
+# closed word list. "Çalışma" (study) was never in the closed list and this
+# structural rule correctly dropped it anyway. Round 2 replaced that
+# structural rule with `_drop_leading_subject`'s two-branch version (see
+# rule.py) because the unconditional version invented wrong values on a
+# different sentence shape — see
+# test_unrecognized_leading_word_drops_the_whole_first_item_not_just_the_word
+# below. "Çalışma" IS in `_ADJUSTMENT_SUBJECT_WORDS`, so this sentence still
+# takes the "strip just the word" branch and the expected output is
+# unchanged by the round-2 fix.
 def test_adjustment_subject_beyond_the_closed_list_is_still_dropped() -> None:
     document = make_document(
         "Yöntem\nÇalışma yaş, cinsiyet ve sigara kullanımı için düzeltildi."
@@ -445,3 +449,60 @@ def test_adjustment_subject_beyond_the_closed_list_is_still_dropped() -> None:
         "cinsiyet",
         "sigara kullanımı",
     ]
+
+
+# --- Fix-round 2 (code review of the round-1 fixes). Both residuals below
+# were things already flagged as unmeasured risk in the round-1 report;
+# the re-reviewer's own probe sentences measured them. Governing ruling is
+# unchanged: when in doubt, emit nothing.
+
+
+# IMPORTANT, re-reviewer-reproduced: round 1's `_LEADING_SUBJECT_TOKEN`
+# dropped the backward span's first whitespace-separated token
+# UNCONDITIONALLY, with no check for whether that token was actually a
+# recognized subject word. "Vücut kitle indeksi" (BMI, one of the most
+# common covariates in clinical data) has the identical surface shape as
+# "Çalışma yaş" — both are whitespace-joined words with no comma before the
+# next delimiter — so the unconditional rule severed it mid-term, turning
+# it into ['kitle indeksi', 'yaş', 'cinsiyet']. "kitle indeksi" is not a
+# term that exists: a WRONG value, not silence, which is strictly worse
+# under this round's ruling than losing "vücut kitle indeksi" outright.
+# `_drop_leading_subject` now discards the WHOLE first item instead of
+# just its first word whenever the leading word is not a recognized
+# subject — see rule.py for the two-branch rule and what it still loses on
+# purpose (an item this shape LOSES ITS FIRST ENTRY ENTIRELY when it
+# happens to open with an unrecognized word, even in the rare case that
+# word really was a legitimate short covariate on its own — not measured
+# how often that happens in practice).
+def test_unrecognized_leading_word_drops_the_whole_first_item_not_just_the_word() -> None:
+    document = make_document(
+        "Yöntem\nVücut kitle indeksi, yaş ve cinsiyet için düzeltildi."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [p.value for p in brief.covariate_concepts] == ["yaş", "cinsiyet"]
+    assert "kitle indeksi" not in [p.value for p in brief.covariate_concepts]
+
+
+# IMPORTANT, re-reviewer-reproduced: round 1's `_NEGATIVE_CONTEXT` caught
+# the negated verb only as literal substrings ("yapılama", "düzeltileme",
+# "edilmedi") — spellings, not a pattern. "-madı/-medi" (simple negation,
+# definite past) is the standard Turkish negative past tense, more common
+# in prose than the "-ama/-eme" (impossibility) forms the substring list
+# happened to cover, and it was not one of the three literal spellings, so
+# "yapılmadı" slipped through: the trigger's covariate pattern
+# ("karıştırıcı") fired and the entire rest of the sentence, including the
+# negation, was extracted as one garbage "covariate". Fixed by replacing
+# the substring list with a stem+suffix pattern (yapıl-/edil-/düzeltil- +
+# either negation form + either past-tense ending) — kept to those three
+# stems, not generalized to all Turkish verbs.
+def test_yapilmadi_negation_does_not_yield_a_covariate() -> None:
+    document = make_document(
+        "Yöntem\nYaş, cinsiyet ve BKİ potansiyel karıştırıcı faktörlerdi "
+        "ancak hiçbir düzeltme yapılmadı."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert brief.covariate_concepts == ()

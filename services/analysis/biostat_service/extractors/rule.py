@@ -126,27 +126,42 @@ CONCEPT_PATTERNS: tuple[tuple[str, str], ...] = (
 # maruziyet, ...) ileriye bakar; yalnızca bu fiil öbeği geriye bakar.
 _BACKWARD_TRIGGER = re.compile(_ADJUSTMENT_VERB, re.IGNORECASE)
 
-# Bilinen ÜÇ kusur sınıfına karşı dar, KAPALI bir olumsuz-bağlam kapısı —
-# genel bir sınıflandırıcı DEĞİL. Eşleşmenin çevresindeki pencerede
-# (bkz. _NEGATIVE_CONTEXT_WINDOW) bunlardan biri varsa eşleşme SESSİZCE
-# atlanır, hiçbir aday üretmez. Üç sınıf da gözden geçirmede ÖLÇÜLEREK
-# (gerçek cümlelerle çalıştırılıp) doğrulandı:
+# Bilinen kusur sınıflarına karşı dar bir olumsuz-bağlam kapısı — genel bir
+# sınıflandırıcı DEĞİL. Eşleşmenin çevresindeki pencerede (bkz.
+# _NEGATIVE_CONTEXT_WINDOW) bunlardan biri varsa eşleşme SESSİZCE atlanır,
+# hiçbir aday üretmez.
 #   (1) atıf: "Smith VE ARK. çalışmasında..." / "et al." — başka bir
 #       çalışmanın kendi beyanı, bu çalışmanınki değil. DESIGN_PATTERNS
 #       yorumundaki (PMC12170779) atıf kusuruyla AYNI sınıf.
-#   (2) kısıtlılık: "...en önemli KISITLILIĞI, ... düzeltme yapılamamış
-#       olmasıdır." — bir kısıtlılık cümlesi tipik olarak YAPILMAMIŞ bir
-#       şeyi anlatır, çalışmanın kendi yönteminin beyanı değil.
-#   (3) olumsuz fiil: "yapılama/düzeltileme/edilmedi" — "düzeltme
-#       YAPILAMAMIŞTIR" ifadenin tam tersini söyler.
-# ÖLÇÜLMEDİ: bu üç örneğin dışındaki atıf/olumsuzlama biçimleri
-# yakalanmaz (örn. "(Smith et al., 2020)" farklı noktalama kullanabilir,
-# ya da "düzeltilmedi" yerine "kontrol edilmedi" gibi başka bir olumsuz
-# fiil kullanılabilir). Liste kasıtlı olarak kısa tutuldu.
+#   (2) kısıtlılık: "...en önemli KISITLILIĞI, ..." — bir kısıtlılık
+#       cümlesi tipik olarak YAPILMAMIŞ bir şeyi anlatır, çalışmanın kendi
+#       yönteminin beyanı değil.
+#   (3) olumsuz fiil — TEK TEK YAZILMIŞ ("yapılama"/"düzeltileme"/
+#       "edilmedi") DEĞİL, gövde+ek KALIBI: yapıl-/edil-/düzeltil- gövdesi
+#       + olumsuzluk eki ("ma"/"me", basit olumsuzlama VEYA "ama"/"eme",
+#       yapabilirlik-olumsuzlaması) + geçmiş zaman eki (-dı/-di/-du/-dü
+#       VEYA -mış/-miş/-muş/-müş). GÖZDEN GEÇİRME TUR 2'DE ÖLÇÜLEN KUSUR:
+#       önceki sürüm yalnızca "yapılama" (gövde+"ama", yapabilirlik-
+#       olumsuzlaması) alt dizesini taşıyordu; Türkçenin en sık geçmiş
+#       zaman OLUMSUZLAMASI olan "-madı/-medi" (basit olumsuzlama) hiç
+#       kapsanmıyordu. "Yaş, cinsiyet ve BKİ potansiyel karıştırıcı
+#       faktörlerdi ancak hiçbir düzeltme YAPILMADI." böylece kapıdan
+#       kaçıyor ve tüm cümle kalıntısı bir "kovaryat" sanılıyordu. Kalıp
+#       artık HER İKİ olumsuzlama biçimini de, HER İKİ geçmiş zaman ekini
+#       de kapsıyor — "yapılamamış" (eski, hâlâ çalışıyor) ile "yapılmadı"
+#       (yeni) aynı alt-kalıpla yakalanıyor.
+# ÖLÇÜLMEDİ: bu üç sınıfın dışındaki atıf/olumsuzlama biçimleri yakalanmaz
+# (örn. "(Smith et al., 2020)" farklı noktalama kullanabilir, ya da
+# "kontrol edilmedi" gibi bu üç gövdenin dışında bir fiil kullanılabilir —
+# kasıtlı olarak yalnızca bu üç gövdeye (yapıl-/edil-/düzeltil-) sınırlı
+# tutuldu, Türkçedeki her fiile genellenmedi).
+_NEGATED_PAST_TENSE = r"(?:d[ıiuü]|m[ıiuü]ş)"
 _NEGATIVE_CONTEXT = re.compile(
     r"ve\s+ark\.|et\s+al\."
     r"|k[ıi]s[ıi]tl[ıi]l[ıi]k|limitation"
-    r"|yap[ıi]lama|d[üu]zeltileme|edilmedi",
+    rf"|yap[ıi]l(?:ma|ama){_NEGATED_PAST_TENSE}"
+    rf"|edil(?:me|eme){_NEGATED_PAST_TENSE}"
+    rf"|d[üu]zeltil(?:me|eme){_NEGATED_PAST_TENSE}",
     re.IGNORECASE,
 )
 
@@ -163,22 +178,29 @@ _NEGATIVE_CONTEXT = re.compile(
 # spec §5'in "tahmin etmektense boş bırak" kuralı.
 _NEGATIVE_CONTEXT_WINDOW = 200
 
-# Geriye bakan ayrıştırmada, ilk parçanın BAŞINDAKİ tek sözcüğü (cümlenin
-# gerçek öznesini, fiili değil) atar. ÖNCEKİ SÜRÜM kapalı bir sözcük listesi
-# kullanıyordu (modeller/model/analizler/analiz) — gözden geçirmede bu
-# listenin SİSTEMATİK bir eksiklik olduğu, "büyütülecek bir liste" olmadığı
-# belirtildi: "Çalışma yaş, cinsiyet ve sigara kullanımı için düzeltildi."
-# listede olmayan bir özneyle ("Çalışma") aynı sızıntıyı yapıyordu. Bunun
-# yerine YAPISAL bir kural: boşlukla ayrılmış İKİ (veya daha çok) sözcük
-# görürse ilkini at. Kapalı listenin aksine sözcük dağarcığına bağlı değil,
-# ama YENİ bir yanlışlık sınıfı açıyor: gerçek ilk kavram kendisi çok
-# sözcüklü BİLEŞİK bir terimse ("Vücut kitle indeksi, yaş ... için
-# düzeltildi" gibi — ilk kalem kendisi 3 sözcük), ilk sözcüğü ("Vücut") de
-# yanlışlıkla atar. Bu ödünleşim ÖLÇÜLMEDİ — yalnızca özne-sızıntısı
-# örneklerinde doğrulandı; regex, bir cümle öznesini çok sözcüklü bir
-# kavramdan sözcüksel bilgi olmadan ayıramaz (ikisi de aynı yüzey şeklini
-# taşır: virgülsüz, boşlukla ayrılmış ardışık sözcükler).
-_LEADING_SUBJECT_TOKEN = re.compile(r"^\w+\s+(?=\w)", re.IGNORECASE)
+# Geriye bakan ayrıştırmada, ilk kalemin ÖNÜNDEKİ cümle öznesini (kavramın
+# kendisini değil) atmak için kullanılan dar, KAPALI bir özne sözcüğü seti.
+# GÖZDEN GEÇİRME TUR 2'DE ÖLÇÜLEN KUSUR (bu sürümde düzeltildi): önceki
+# sürüm YAPISAL bir kural kullanıyordu — "boşlukla ayrılmış iki+ sözcük
+# görürsen ilkini at, hangi sözcük olduğuna bakma." "Vücut kitle indeksi,
+# yaş ve cinsiyet için düzeltildi." cümlesinde bu kural "Vücut"u da attı ve
+# ['kitle indeksi', 'yaş', 'cinsiyet'] üretti — "kitle indeksi" var
+# OLMAYAN bir terim. Bu, eski kapalı-liste kusurunun (sızdırılmış ama BÜTÜN
+# bir özne) tersi, DAHA KÖTÜ bir hata: kısmen kesilmiş, UYDURULMUŞ bir
+# değer. Bu turun kuralı şüphede sessizliktir; bu yüzden yapısal kural artık
+# YOK — yerine iki dallı bir kural geldi (bkz. `_drop_leading_subject`):
+#   - ilk sözcük bu KAPALI listede ise: SADECE o sözcüğü at, kalemin geri
+#     kalanını (çok sözcüklü olsa bile) bozmadan bırak.
+#   - değilse: ilk sözcüğü kesmeyi DENEMEZ — cümle öznesini çok sözcüklü
+#     bir bileşik terimden (aynı yüzey şeklini taşırlar: virgülsüz,
+#     boşlukla ayrılmış ardışık sözcükler) sözcüksel bilgi olmadan ayırt
+#     edemeyeceği için, İLK KALEMİN TAMAMINI atar — "Vücut kitle indeksi"yi
+#     kaybetmek kabul edilebilir, "kitle indeksi" UYDURMAK değil.
+# Liste büyümeye açık ama KASITLI OLARAK küçük tutuluyor; her yeni sözcük
+# gerçek bir örnekle gerekçelendirilmeli, "olabilir" diye eklenmemeli.
+_ADJUSTMENT_SUBJECT_WORDS = frozenset(
+    {"modeller", "model", "analizler", "analiz", "çalışma"}
+)
 
 # İleri yönlü ayrıştırmada, tetikleyiciden HEMEN sonra gelen ve kavramın
 # kendisi OLMAYAN iskele sözcüklerini atar. ÖLÇÜLMÜŞ İKİ KUSUR:
@@ -372,8 +394,9 @@ class RuleExtractor:
         missing delimiter inside the bound now returns "" rather than
         falling back to ANY wider window, bounded or not.
 
-        `_LEADING_SUBJECT_TOKEN` then drops the clause's own subject; see
-        its comment for what this still gets wrong.
+        `_drop_leading_subject` then removes whatever precedes the
+        covariate list at the front of the span; see its comment for what
+        it does and does not attempt.
         """
         window_floor = max(0, match.start() - CONCEPT_MAX_CHARS * 4)
         window_start = max(
@@ -383,7 +406,46 @@ class RuleExtractor:
         if window_start < 0:
             return ""
         span = text[window_start + 1 : match.end()]
-        return _LEADING_SUBJECT_TOKEN.sub("", span, count=1)
+        return RuleExtractor._drop_leading_subject(span)
+
+    @staticmethod
+    def _drop_leading_subject(span: str) -> str:
+        """Remove whatever precedes the covariate list at the front of `span`.
+
+        Two branches, chosen so neither branch can INVENT a value:
+          - the leading word IS in `_ADJUSTMENT_SUBJECT_WORDS`: strip JUST
+            that word, keeping the rest of the first item intact even if
+            it is itself a multi-word compound (e.g. "vücut kitle
+            indeksi").
+          - anything else: a bare leading word cannot be told apart from
+            the first word of a genuine multi-word compound term without
+            lexical knowledge this engine does not have (both are
+            whitespace-joined words with no comma before the next
+            delimiter — see the MEASURED counterexample below). Rather
+            than guess by cutting mid-term, the WHOLE first item is
+            discarded — including the ONLY item, if the span has no
+            comma/"ve"/"and"/"ile" at all, which returns "" (silence, not
+            a guess at which prefix is real).
+
+        MEASURED (code review round 2): the prior version
+        (`_LEADING_SUBJECT_TOKEN`, an unconditional first-token drop with
+        no subject check) turned "Vücut kitle indeksi, yaş ve cinsiyet
+        için düzeltildi." into ['kitle indeksi', 'yaş', 'cinsiyet'] —
+        "kitle indeksi" is not a term that exists. That version traded the
+        earlier closed-list defect (a leaked-but-WHOLE subject) for one
+        that severs a genuine compound concept mid-term: a WRONG value,
+        not silence, which this round's ruling treats as strictly worse
+        than losing the item outright.
+        """
+        leading = re.match(r"^\s*(\w+)\s+", span)
+        if leading is None:
+            return span
+        if leading.group(1).lower() in _ADJUSTMENT_SUBJECT_WORDS:
+            return span[leading.end() :]
+        delimiter = _SPLIT.search(span)
+        if delimiter is None:
+            return ""
+        return span[delimiter.end() :]
 
     @staticmethod
     def _sentence_around(text: str, index: int) -> str:
