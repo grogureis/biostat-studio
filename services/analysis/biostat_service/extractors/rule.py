@@ -178,29 +178,23 @@ _NEGATIVE_CONTEXT = re.compile(
 # spec §5'in "tahmin etmektense boş bırak" kuralı.
 _NEGATIVE_CONTEXT_WINDOW = 200
 
-# Geriye bakan ayrıştırmada, ilk kalemin ÖNÜNDEKİ cümle öznesini (kavramın
-# kendisini değil) atmak için kullanılan dar, KAPALI bir özne sözcüğü seti.
-# GÖZDEN GEÇİRME TUR 2'DE ÖLÇÜLEN KUSUR (bu sürümde düzeltildi): önceki
-# sürüm YAPISAL bir kural kullanıyordu — "boşlukla ayrılmış iki+ sözcük
-# görürsen ilkini at, hangi sözcük olduğuna bakma." "Vücut kitle indeksi,
-# yaş ve cinsiyet için düzeltildi." cümlesinde bu kural "Vücut"u da attı ve
-# ['kitle indeksi', 'yaş', 'cinsiyet'] üretti — "kitle indeksi" var
-# OLMAYAN bir terim. Bu, eski kapalı-liste kusurunun (sızdırılmış ama BÜTÜN
-# bir özne) tersi, DAHA KÖTÜ bir hata: kısmen kesilmiş, UYDURULMUŞ bir
-# değer. Bu turun kuralı şüphede sessizliktir; bu yüzden yapısal kural artık
-# YOK — yerine iki dallı bir kural geldi (bkz. `_drop_leading_subject`):
-#   - ilk sözcük bu KAPALI listede ise: SADECE o sözcüğü at, kalemin geri
-#     kalanını (çok sözcüklü olsa bile) bozmadan bırak.
-#   - değilse: ilk sözcüğü kesmeyi DENEMEZ — cümle öznesini çok sözcüklü
-#     bir bileşik terimden (aynı yüzey şeklini taşırlar: virgülsüz,
-#     boşlukla ayrılmış ardışık sözcükler) sözcüksel bilgi olmadan ayırt
-#     edemeyeceği için, İLK KALEMİN TAMAMINI atar — "Vücut kitle indeksi"yi
-#     kaybetmek kabul edilebilir, "kitle indeksi" UYDURMAK değil.
-# Liste büyümeye açık ama KASITLI OLARAK küçük tutuluyor; her yeni sözcük
-# gerçek bir örnekle gerekçelendirilmeli, "olabilir" diye eklenmemeli.
-_ADJUSTMENT_SUBJECT_WORDS = frozenset(
-    {"modeller", "model", "analizler", "analiz", "çalışma"}
-)
+# Geriye bakan ayrıştırmada ilk kalemin önündeki cümle öznesini nasıl
+# ele aldığımız İKİ tur boyunca değişti, ikisinde de bir değer UYDURDU:
+#   - Tur 1: yapısal kural ("iki+ boşlukla ayrılmış sözcük görürsen ilkini
+#     at") — "Vücut kitle indeksi, ..." içindeki "Vücut"u attı ve var
+#     OLMAYAN "kitle indeksi" terimini uydurdu.
+#   - Tur 2: kapalı özne-sözcüğü listesi + "listede değilse ilk KALEMİN
+#     TAMAMINI at" — "Model performansı, ..." içinde "Model" listedeydi,
+#     yalnızca o atıldı ve "performansı" bir kovaryat sanıldı (Türkçe
+#     bileşik özneler TAM DA bu tür sözcüklerden kurulur); "değilse" dalı
+#     da "ve"/"ile"yi özne sınırı sanarak "Hasta ve hekim değerlendirmesi,
+#     ..." içinde özneNİN İÇİNDEKİ "ve"de durup "hekim değerlendirmesi"yi
+#     uydurdu.
+# Sonuç: bir regex'in bir Türkçe öznenin nerede bittiğini bulması mümkün
+# değil — bileşik özneler, "ve"/"ile" ile bağlanan özneler, iyelik ekleri;
+# denenen HER kural kendi karşı-örneğini üretti. Tur 3 artık öznenin
+# nerede bittiğini BULMAYA çalışmıyor — bkz. `_backward_span` içindeki
+# "TRUST ONLY THE COMMA" yorumu.
 
 # İleri yönlü ayrıştırmada, tetikleyiciden HEMEN sonra gelen ve kavramın
 # kendisi OLMAYAN iskele sözcüklerini atar. ÖLÇÜLMÜŞ İKİ KUSUR:
@@ -394,9 +388,13 @@ class RuleExtractor:
         missing delimiter inside the bound now returns "" rather than
         falling back to ANY wider window, bounded or not.
 
-        `_drop_leading_subject` then removes whatever precedes the
-        covariate list at the front of the span; see its comment for what
-        it does and does not attempt.
+        Round 3 of the code review replaced the leading-subject handling
+        entirely — see the "TRUST ONLY THE COMMA" comment below. Two
+        prior attempts (a closed subject-word list, then a two-branch
+        word-list-or-discard-whole-item rule) each MEASURABLY invented a
+        wrong value on some ordinary Turkish sentence. This version
+        cannot invent one: it never guesses where a subject ends, because
+        it never tries to identify a subject at all.
         """
         window_floor = max(0, match.start() - CONCEPT_MAX_CHARS * 4)
         window_start = max(
@@ -406,46 +404,44 @@ class RuleExtractor:
         if window_start < 0:
             return ""
         span = text[window_start + 1 : match.end()]
-        return RuleExtractor._drop_leading_subject(span)
 
-    @staticmethod
-    def _drop_leading_subject(span: str) -> str:
-        """Remove whatever precedes the covariate list at the front of `span`.
-
-        Two branches, chosen so neither branch can INVENT a value:
-          - the leading word IS in `_ADJUSTMENT_SUBJECT_WORDS`: strip JUST
-            that word, keeping the rest of the first item intact even if
-            it is itself a multi-word compound (e.g. "vücut kitle
-            indeksi").
-          - anything else: a bare leading word cannot be told apart from
-            the first word of a genuine multi-word compound term without
-            lexical knowledge this engine does not have (both are
-            whitespace-joined words with no comma before the next
-            delimiter — see the MEASURED counterexample below). Rather
-            than guess by cutting mid-term, the WHOLE first item is
-            discarded — including the ONLY item, if the span has no
-            comma/"ve"/"and"/"ile" at all, which returns "" (silence, not
-            a guess at which prefix is real).
-
-        MEASURED (code review round 2): the prior version
-        (`_LEADING_SUBJECT_TOKEN`, an unconditional first-token drop with
-        no subject check) turned "Vücut kitle indeksi, yaş ve cinsiyet
-        için düzeltildi." into ['kitle indeksi', 'yaş', 'cinsiyet'] —
-        "kitle indeksi" is not a term that exists. That version traded the
-        earlier closed-list defect (a leaked-but-WHOLE subject) for one
-        that severs a genuine compound concept mid-term: a WRONG value,
-        not silence, which this round's ruling treats as strictly worse
-        than losing the item outright.
-        """
-        leading = re.match(r"^\s*(\w+)\s+", span)
-        if leading is None:
-            return span
-        if leading.group(1).lower() in _ADJUSTMENT_SUBJECT_WORDS:
-            return span[leading.end() :]
-        delimiter = _SPLIT.search(span)
-        if delimiter is None:
+        # TRUST ONLY THE COMMA. Round 3, MEASURED: both prior mechanisms
+        # for locating the covariate list's start invented a value.
+        # (1) A closed subject-word list only strips the head word, but
+        #     Turkish compound subjects are built from exactly those
+        #     words: "Model performansı, ..." stripped "Model" and kept
+        #     "performansı" as if it were a covariate.
+        # (2) Falling back to "ve"/"ile" as a subject-boundary signal
+        #     stops wherever one of THOSE words appears, even inside the
+        #     subject itself: "Hasta ve hekim değerlendirmesi, yaş..."
+        #     split on the first "ve" and kept "hekim değerlendirmesi" —
+        #     part of the subject, not a covariate.
+        # A regex cannot find where a Turkish subject ends: compound
+        # subjects, subjects joined by "ve"/"ile", possessive suffixes —
+        # every rule tried here has its own counterexample. So this
+        # version does not try. It trusts exactly one signal: a comma.
+        # Everything up to and including the FIRST comma is discarded
+        # unconditionally (subject or not — this version does not know
+        # or care which), and the items after it are read normally. If
+        # there is no comma in the span, there is no reliable signal for
+        # where the list starts, so nothing is emitted.
+        #
+        # KNOWN, DELIBERATE LOSSES — do not "fix" these by restoring a
+        # subject-detection mechanism; every one tried so far invented a
+        # wrong value instead:
+        #   - "Yaş, cinsiyet ve BKİ için düzeltildi." (no subject at all)
+        #     loses "yaş" — the first item is ALWAYS discarded, even when
+        #     there was nothing to discard it for.
+        #   - "Analiz sonuçları yaş ve cinsiyet için düzeltildi." (no
+        #     comma anywhere) yields NOTHING, even though "yaş" and
+        #     "cinsiyet" are real covariates two words later.
+        # Accepted per this round's ruling: a lost concept is visible and
+        # cheap (the user is asked about the column); an invented one
+        # silently routes a variable into the wrong analysis.
+        comma = span.find(",")
+        if comma == -1:
             return ""
-        return span[delimiter.end() :]
+        return span[comma + 1 :]
 
     @staticmethod
     def _sentence_around(text: str, index: int) -> str:
