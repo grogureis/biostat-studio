@@ -355,8 +355,23 @@ raporlandı, `8f` tarafından git ile doğrulanıp yazıldı. 1b Task 8'i uygula
 
 ## Sıradaki iş
 
-**1. ⏸️ GÜN SONU MOLASI — Plan 2 çalıştırması 4/10 task tamam, yarın devam.**
-2026-08-24 gece, Erdem eve gidiyor. **Yarın "devam" demesi yeterli.**
+**1. ⏸️ MOLA — kullanım limiti doldu (2026-08-25, ~2 saat sonra yenilenecek).**
+Plan 2 çalıştırması **5/10 task**. **Dönüşte "devam" demesi yeterli.**
+
+**Dönüşte ilk iş — Task 5'in son turu (onay alındı sayılmaz, Erdem'e tekrar sorulacak):**
+İleri yol kovaryat çıkarımının **pozitif testi yok**. Bugün `"Models were adjusted for age, sex,
+and BMI."` → `['age','sex','BMI']` çalışıyor (reviewer koşturup gördü) ama hiçbir test onu
+korumuyor: kaldırmadan önceki tek pozitif kovaryat testi geriye-bakan yolu sınıyordu, o da silindi.
+Tek küçük iş: bu cümle için pozitif gerileme testi ekle, Task 5'i kapat, Task 6'ya geç.
+
+**Task 5 dört düzeltme turu sürdü ve sonucu bir ÖLÇÜM:** kural motoru Türkçe fiil-sonu kovaryat
+cümlelerini ("X, Y **için düzeltildi**") güvenilir ayrıştıramıyor. Dört mekanizma denendi
+(ileriye-kuyruk · geriye-span + kapalı liste · iki-dallı özne kuralı · yalnızca-virgül); dördü de
+gerçek cümlelerde **uydurma kovaryat** üretti (`'performansı'`, `'hekim değerlendirmesi'`,
+`'çok değişkenli lojistik regresyon'`). Yol **silindi**, sınır `rule.py:91-126`'da gerekçesiyle
+kayıtlı, sessizlik 9 testle sabitlendi. İleri yollar (İngilizce `adjusted for`, Türkçe "kovaryat
+olarak ... alındı") ve sonuç/maruziyet çıkarımı **çalışıyor, doğrulandı**.
+Bu, Plan 3'ün gold set'i için taban çizgisi verisidir — "LLM ne katıyor" sorusunun ölçülmüş zemini.
 
 Dal: `feat/methodology-matching` (worktree `.worktrees/methodology-intake`; worktree adı eski
 dalın adını taşıyor, **dal adına bakın**). Base `1be5ebe`.
@@ -364,7 +379,7 @@ Yöntem: subagent-driven, her task'tan sonra inceleme, sonda **zorunlu** tam dal
 (Erdem'in kararı). Uygulayan ile denetleyen ayrı — Plan 1'in ölçülmüş dersi.
 Ledger — **tek doğru kaynak**: `.superpowers/sdd/2026-08-24-metodoloji-eslestirme-plan2/progress.md`
 (git-ignored; `git clean -fdx` onu siler, o zaman `git log`'dan kurtarın).
-Ölçüm: **287 Python + 70 desktop**, typecheck temiz, çalışma ağacı temiz.
+Ölçüm: **302 Python + 70 desktop**, çalışma ağacı temiz, son commit `3398a8f`.
 
 | Task | Durum |
 |---|---|
@@ -372,13 +387,10 @@ Ledger — **tek doğru kaynak**: `.superpowers/sdd/2026-08-24-metodoloji-eslest
 | 2 — Servis yüzeyi (`app.py`) | ✅ complete (`268f3ca..6e5b1d1`), 1 fix turu, 285 passed |
 | 3 — Renderer köprüsü | ✅ complete (`6e5b1d1..066be79`), 1 fix turu (ruling), 70/70 desktop |
 | 4 — Eşleştirme sözleşmesi | ✅ complete (`066be79..a12d332`), fix turu gerekmedi, 287 passed |
-| 5 — Kavram çıkarımı (`rule.py`) | 🔶 kodlandı (`af6ac6e`, 290 passed) — **incelemesi gönderilmedi** |
+| 5 — Kavram çıkarımı (`rule.py`) | 🔶 **4 fix turu bitti ve doğrulandı** (`a12d332..3398a8f`, 302 passed) — kapanış için tek küçük iş kaldı (yukarıdaki pozitif test) |
 | 6-10 | başlanmadı, briefleri hazır |
 
-**Yarın ilk komut:** `scripts/review-package <plan> a12d332 af6ac6e` → task reviewer dispatch.
-Sonra Task 6.
-
-### Task 5 — planın DÖRDÜNCÜ kusuru burada çıktı, incelemenin asıl konusu bu
+### (eski kayıt — tarihsel) Task 5'in başlangıçtaki kusur analizi
 
 **Brief'in verdiği `_concepts` kodu kendi testini geçmiyor.** Sebep Türkçe'nin fiil-sonu yapısı:
 *"Modeller yaş, cinsiyet ve VKİ **için düzeltildi**"* — kalıp (`düzeltildi`) cümlenin **sonunda**,
