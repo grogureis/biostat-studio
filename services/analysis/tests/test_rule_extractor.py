@@ -540,3 +540,59 @@ def test_verb_final_with_appositive_after_subject_yields_nothing() -> None:
     assert "çok değişkenli lojistik regresyon" not in [
         p.value for p in brief.covariate_concepts
     ]
+
+
+# --- Fix-round 5 (code review of the round-4 removal): the forward
+# covariate path had NO positive regression test. Every covariate
+# assertion in this file, after round 4, asserted silence — meaning a
+# future change that broke forward extraction (the path round 4 explicitly
+# kept working) would pass the whole suite silently. A capability with no
+# positive test is a capability that can die quietly.
+#
+# Both tests below assert what the code ACTUALLY does today, not what it
+# ideally should — pinning an ideal would fail immediately and invite
+# widening a pattern just to satisfy the test, which is exactly backwards.
+
+
+def test_english_adjusted_for_list_is_extracted() -> None:
+    """The forward covariate path's baseline positive case: concepts
+    follow the trigger ("adjusted for X, Y, and Z"), unaffected by the
+    verb-final removal in round 4.
+    """
+    document = make_document(
+        "Methods\nModels were adjusted for age, sex, and BMI."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [p.value for p in brief.covariate_concepts] == ["age", "sex", "BMI"]
+
+
+def test_turkish_kovaryat_olarak_list_is_extracted_with_known_trailing_verb_residue() -> None:
+    """Turkish forward covariate reading: "kovaryat" precedes the list
+    here ("kovaryat OLARAK yaş, cinsiyet ve sigara kullanımı alındı" =
+    "age, sex, and smoking status were taken AS covariates"), unlike the
+    verb-final construction round 4 removed.
+
+    PINS REALITY, NOT THE IDEAL: the last item comes out as "sigara
+    kullanımı alındı" — the trailing verb "alındı" ("were taken") is
+    glued on, not "sigara kullanımı" alone. This is the KNOWN, PARKED
+    trailing-bare-verb gap (`_TRAILING` only strips a trailing verb when
+    "olarak" is directly adjacent to it, not a bare verb like "alındı" at
+    the end of a list) — parked for the whole-branch review, not fixed
+    here. Do not "fix" this test by widening `_TRAILING` or adding
+    "alındı" to some verb list; that decision belongs to the parked
+    whole-branch pass, alongside the English confounder stem-glue defect
+    and the other parked minors.
+    """
+    document = make_document(
+        "Yöntem\nKovaryat olarak yaş, cinsiyet ve sigara kullanımı alındı."
+    )
+
+    brief = RuleExtractor().extract_brief(document)
+
+    assert [p.value for p in brief.covariate_concepts] == [
+        "yaş",
+        "cinsiyet",
+        "sigara kullanımı alındı",
+    ]
