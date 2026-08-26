@@ -274,8 +274,29 @@ class RuleExtractor:
         concepts: BriefProposal,
         columns: tuple[ColumnSummary, ...],
     ) -> tuple[RoleProposal, ...]:
-        """Map extracted concepts onto workbook columns. Silence over guessing."""
+        """Map extracted concepts onto workbook columns. Silence over guessing.
+
+        Concepts are scanned outcome -> exposure -> covariate. That order is
+        PRIORITY, not incidental iteration order: a column misassigned as an
+        outcome blocks the planner outright (the most expensive failure this
+        engine can cause), a stray covariate is comparatively cheap to be
+        wrong about, so outcome concepts get first claim.
+
+        When two concepts from DIFFERENT groups target the same column, the
+        HIGHER `best_column` score wins outright, regardless of which role
+        reached it first. MEASURED REGRESSION (code review round 1): a
+        weak 0.85-scoring match — from the containment floor that
+        matching.similarity used to grant substring overlaps, since removed
+        as a false-positive source — used to survive over a later, exact
+        1.0 match for the same column, silently publishing the weaker
+        match's evidence sentence under a plausible-looking column name.
+        The outcome -> exposure -> covariate order above is consulted ONLY
+        to break an EXACT score tie: a column already claimed by a
+        higher-priority role is not displaced by a same-scoring
+        lower-priority one.
+        """
         proposals: dict[str, RoleProposal] = {}
+        best_scores: dict[str, float] = {}
         for role, group in (
             ("outcome", concepts.outcome_concepts),
             ("exposure", concepts.exposure_concepts),
@@ -283,9 +304,12 @@ class RuleExtractor:
         ):
             for concept in group:
                 match = best_column(concept.value, columns)
-                if match is None or match[0] in proposals:
+                if match is None:
                     continue
                 name, score = match
+                if name in best_scores and score <= best_scores[name]:
+                    continue
+                best_scores[name] = score
                 proposals[name] = RoleProposal(
                     column=name,
                     role=Proposal(

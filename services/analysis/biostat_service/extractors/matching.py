@@ -71,12 +71,23 @@ def similarity(concept: str, column: str) -> float:
         return 0.0
     if left == right:
         return 1.0
-    # Bir kavramın sütun adının İÇİNDE geçmesi (ya da tersi) gerçek bir
-    # eşleşmedir ama SequenceMatcher uzunluk farkı yüzünden bunu cezalandırır:
-    # "yas" ile "hastanin_yasi" arasında ratio düşük çıkar. İçerme durumunda
-    # taban skor veriyoruz, ve ratio daha yüksekse onu bırakıyoruz.
-    containment = 0.85 if left in right or right in left else 0.0
-    return max(containment, SequenceMatcher(None, left, right).ratio())
+    # Bir içerme tabanı denendi ("left in right or right in left" ise sabit
+    # 0.85) ve gerçek klinik sütun adlarıyla ÖLÇÜLEREK KALDIRILDI: 0.85 >
+    # MATCH_THRESHOLD (0.80) olduğu için TEK BAŞINA bir sütunu bir kavrama
+    # bağlamaya yetiyordu. Ölçülen yanlış pozitifler (hepsi tam 0.850
+    # skorluyordu):
+    #   "yaş" (yaş)      ↔ "yasam_suresi" (sağkalım süresi — alakasız)
+    #   "hasta" (hasta)  ↔ "hastane_kodu" (hastane kodu — alakasız)
+    #   "smoking"        ↔ "nonsmoking_status" (KUTUPLUĞU TERS ÇEVİRİYOR)
+    # Üstelik brief'in kendi başlık örneğinde İŞE YARAMIYORDU: "otuz gunluk
+    # mortalite orani" ↔ "mortalite_30g" içerme koşulunu hiç sağlamıyor,
+    # skor salt SequenceMatcher ratio'suyla 0.500'de kalıyordu — yani taban
+    # hem gereksiz yere izin veriyor hem de asıl hedef vakada işe yaramıyordu.
+    # GERİ EKLEMEYİN: yerine uzunluk-ölçekli bir içerme skoru ya da bir
+    # token-örtüşme sezgisi icat etmek de aynı tuzak — kalibrasyon Plan 3'ün
+    # gold set'inin işi, bu motorun değil (Task 5'in beş turda öğrendiği
+    # ders: sessizlik ve soru ucuz, uydurulmuş skor pahalı).
+    return SequenceMatcher(None, left, right).ratio()
 
 
 def best_column(

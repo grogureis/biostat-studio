@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from biostat_service.extractors.contracts import BriefProposal, ColumnSummary, Proposal
 from biostat_service.extractors.rule import RuleExtractor
 from biostat_service.methodology_intake import MethodologyDocument
 
@@ -596,3 +597,68 @@ def test_turkish_kovaryat_olarak_list_is_extracted_with_known_trailing_verb_resi
         "cinsiyet",
         "sigara kullanımı alındı",
     ]
+
+
+def _concept(value: str) -> Proposal:
+    return Proposal(value=value, confidence=0.7, source="rule")
+
+
+def test_match_variables_higher_score_wins_over_earlier_claim() -> None:
+    """Regression, code review round 1 on Task 6.
+
+    Before the fix, the FIRST concept to claim a column kept it regardless
+    of score: an outcome concept scanned first could plant a merely-close
+    match ("sistolik kan basınc", missing the final vowel, scoring ~0.971)
+    and a later, EXACT covariate match for the same column ("sistolik KB",
+    scoring 1.0 via the abbreviation table) was silently dropped —
+    publishing the weaker match's evidence sentence under the wrong role.
+    The higher score must win regardless of which role reached the column
+    first.
+    """
+    document = make_document("irrelevant for match_variables")
+    concepts = BriefProposal(
+        outcome_concepts=(_concept("sistolik kan basınc"),),
+        covariate_concepts=(_concept("sistolik KB"),),
+    )
+    columns = (
+        ColumnSummary(
+            name="sistolik_kan_basinci",
+            kind="continuous",
+            unique_values=50,
+            non_missing=100,
+        ),
+    )
+
+    result = RuleExtractor().match_variables(document, concepts, columns)
+
+    assert len(result) == 1
+    assert result[0].column == "sistolik_kan_basinci"
+    assert result[0].role.value == "covariate"
+    assert result[0].role.confidence == 1.0
+
+
+def test_match_variables_equal_score_falls_back_to_role_priority() -> None:
+    """When two concepts score IDENTICALLY for the same column, the
+    outcome -> exposure -> covariate scan order breaks the tie: outcome
+    (scanned first) keeps its claim over a same-scoring covariate. This is
+    the one case where scan order still matters after the higher-score-wins
+    fix above.
+    """
+    document = make_document("irrelevant for match_variables")
+    concepts = BriefProposal(
+        outcome_concepts=(_concept("sistolik KB"),),
+        covariate_concepts=(_concept("sistolik KB"),),
+    )
+    columns = (
+        ColumnSummary(
+            name="sistolik_kan_basinci",
+            kind="continuous",
+            unique_values=50,
+            non_missing=100,
+        ),
+    )
+
+    result = RuleExtractor().match_variables(document, concepts, columns)
+
+    assert len(result) == 1
+    assert result[0].role.value == "outcome"
