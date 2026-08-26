@@ -242,6 +242,19 @@ _TRAILING = re.compile(
 CONCEPT_MIN_CHARS = 2
 CONCEPT_MAX_CHARS = 60
 
+# Task 7: kind iddiası üreten kalıplar. Bir sütunun ADI cümlede geçiyor ve
+# cümle sınıflandırma dili taşıyorsa, belge o sütun için "kategorik"
+# iddiasında bulunuyordur. Kalıplar DAR tutuldu: Plan 1'de ölçülen ders
+# (STATE.md 0c bulgu 3), geniş kalıbın başka bir çalışmadan yapılan
+# ALINTIYI kendi beyanı sanmasıydı. Bu kalıp da aynı riski taşır — bkz.
+# RuleExtractor._kind_claim'in _negative_context'i yeniden kullanma
+# gerekçesi.
+CATEGORICAL_CLAIM = re.compile(
+    r"(sınıfland[ıi]r|gruplan?d[ıi]r|kategori|evrele(?:me|ndi)|"
+    r"classified|categori[sz]ed|grouped into|stratified)",
+    re.IGNORECASE,
+)
+
 
 class RuleExtractor:
     """Keyword-based extractor with no external dependency."""
@@ -294,6 +307,18 @@ class RuleExtractor:
         to break an EXACT score tie: a column already claimed by a
         higher-priority role is not displaced by a same-scoring
         lower-priority one.
+
+        A SECOND, INDEPENDENT pass (Task 7) then looks for a `kind` claim
+        per column: it does NOT go through `best_column` above — it scans
+        `document.text` for the column's own NAME and checks whether the
+        surrounding sentence carries classification language
+        (`CATEGORICAL_CLAIM`). This reaches columns the concept matcher
+        above cannot (a short, exact column name like "evre" is easy to
+        find as a literal word; the matcher's fuzzy scoring is what stays
+        weak, per Task 6's measured yaş/hastanin_yasi gap) and it can
+        populate `kind` on a column that already has a `role` from the
+        first pass, or on one that has none — `role` and `kind` are
+        independently optional (see RoleProposal's docstring).
         """
         proposals: dict[str, RoleProposal] = {}
         best_scores: dict[str, float] = {}
@@ -320,7 +345,72 @@ class RuleExtractor:
                         evidence_offset=concept.evidence_offset,
                     ),
                 )
+
+        # Sorted, not `columns` order: the same document+workbook pair
+        # must always produce the same plan digest regardless of the
+        # workbook's own column order (Global Constraints, determinism).
+        for column in sorted(columns, key=lambda item: item.name):
+            kind = self._kind_claim(document.text, column.name)
+            if kind is None:
+                continue
+            existing = proposals.get(column.name)
+            proposals[column.name] = RoleProposal(
+                column=column.name,
+                role=existing.role if existing is not None else None,
+                kind=kind,
+            )
+
         return tuple(proposals[name] for name in sorted(proposals))
+
+    def _kind_claim(self, text: str, column_name: str) -> Proposal | None:
+        """A "categorical" claim for one column's data type, or None.
+
+        Looks for the column's own name as a STANDALONE word in `text`
+        (word-boundary, not a substring or prefix match) and, for the
+        first such occurrence whose surrounding sentence
+        (`_sentence_around`, reused as-is — no second sentence splitter)
+        carries classification language (`CATEGORICAL_CLAIM`), returns the
+        claim. `_negative_context` gates out the same two false-fire
+        classes documented above it: a classification stated about a
+        CITED study, and a classification named in a stated LIMITATION —
+        neither is this document's own statement about this column.
+
+        SCOPE LIMIT, DELIBERATE: exact word only, not a prefix match.
+        Turkish suffixes glue onto a stem with no boundary a regex can
+        see ("evre" + dative "-sine" = "evresine"), so a genuinely common
+        phrasing like "TNM evresine göre" is missed — see
+        test_kind_claim_requires_the_bare_column_name_not_a_suffixed_turkish_form
+        for the measured example. A prefix match (`evre\\w*`) would catch
+        it, but would also catch unrelated words sharing the same stem
+        ("evrensel" = universal, "evrimsel" = evolutionary) — a false
+        positive this engine treats as worse than staying silent (spec
+        §5), the same trade this file has made for Turkish morphology
+        every other time it came up (see the covariate verb-final removal
+        above). Not fixed here; do not widen to a prefix match without
+        re-reading that history.
+        """
+        pattern = re.compile(rf"\b{re.escape(column_name)}\b", re.IGNORECASE)
+        for match in pattern.finditer(text):
+            if self._negative_context(text, match):
+                continue
+            sentence = self._sentence_around(text, match.start())
+            if not CATEGORICAL_CLAIM.search(sentence):
+                continue
+            # Search from near the match, not from the start of `text`:
+            # a shared sentence could otherwise recur earlier in a long
+            # document and publish the wrong offset (same reasoning as
+            # `_design`/`_concepts` relocating evidence into original_text).
+            search_start = max(0, match.start() - EVIDENCE_MAX_CHARS)
+            located = text.find(sentence, search_start)
+            evidence_offset = located if located >= 0 else None
+            return Proposal(
+                value="categorical",
+                confidence=RULE_CONFIDENCE,
+                source=self.name,
+                evidence=sentence[:EVIDENCE_MAX_CHARS],
+                evidence_offset=evidence_offset,
+            )
+        return None
 
     def _design(self, original_text: str, text: str) -> Proposal | None:
         # Pick the pattern whose match starts EARLIEST in `text`, not the

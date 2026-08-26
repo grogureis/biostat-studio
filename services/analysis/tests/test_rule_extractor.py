@@ -662,3 +662,146 @@ def test_match_variables_equal_score_falls_back_to_role_priority() -> None:
 
     assert len(result) == 1
     assert result[0].role.value == "outcome"
+
+
+# --- Task 7: kind iddiası (doküman kaynaklı kategorik düzeltme) ---
+
+
+def _stage_column(**overrides: object) -> ColumnSummary:
+    defaults: dict[str, object] = dict(
+        name="evre", kind="continuous", unique_values=4, non_missing=100
+    )
+    defaults.update(overrides)
+    return ColumnSummary(**defaults)  # type: ignore[arg-type]
+
+
+def test_kind_claim_fires_when_the_columns_own_name_carries_classification_language() -> (
+    None
+):
+    """The minimal positive case: the column's bare name, followed by a
+    sentence that carries CATEGORICAL_CLAIM language, produces a kind
+    proposal — with no role concept involved at all.
+    """
+    document = make_document(
+        "Yöntem\nHastalar evre I-IV olarak sınıflandırıldı."
+    )
+
+    result = RuleExtractor().match_variables(
+        document, BriefProposal(), (_stage_column(),)
+    )
+
+    assert len(result) == 1
+    assert result[0].column == "evre"
+    assert result[0].role is None
+    assert result[0].kind is not None
+    assert result[0].kind.value == "categorical"
+    assert result[0].kind.source == "rule"
+    assert "sınıflandırıldı" in result[0].kind.evidence.lower()
+
+
+def test_kind_claim_merges_onto_an_existing_role_proposal_for_the_same_column() -> None:
+    """Role and kind are independently optional (contracts.py docstring) —
+    when a concept match already claimed this column for a role, the kind
+    claim must be ADDED to that same RoleProposal, not silently dropped or
+    published as a second, conflicting entry for the same column.
+    """
+    document = make_document(
+        "Yöntem\nBirincil sonlanım evre olarak belirlendi. "
+        "Hastalar evre I-IV olarak sınıflandırıldı."
+    )
+    concepts = BriefProposal(outcome_concepts=(_concept("evre"),))
+    columns = (_stage_column(),)
+
+    result = RuleExtractor().match_variables(document, concepts, columns)
+
+    assert len(result) == 1
+    assert result[0].column == "evre"
+    assert result[0].role is not None
+    assert result[0].role.value == "outcome"
+    assert result[0].kind is not None
+    assert result[0].kind.value == "categorical"
+
+
+def test_kind_claim_ignores_a_sentence_about_a_different_variable() -> None:
+    """The column's name appears in the text, but ITS OWN sentence carries
+    no classification language — a classification sentence about a
+    different variable, isolated from it by a period, must not leak over
+    and produce a claim for this column.
+    """
+    document = make_document(
+        "Yöntem\nHastalar yaş gruplarına göre kategorize edildi. "
+        "Evre TNM sistemine göre kaydedildi."
+    )
+
+    result = RuleExtractor().match_variables(
+        document, BriefProposal(), (_stage_column(),)
+    )
+
+    assert result == ()
+
+
+def test_kind_claim_does_not_fire_from_a_cited_studys_classification() -> None:
+    """Same false-fire class as CONCEPT_PATTERNS (see _NEGATIVE_CONTEXT):
+    a classification stated about ANOTHER study's cohort is not this
+    study's own statement about the column.
+    """
+    document = make_document(
+        "Yöntem\nSmith ve ark. çalışmasında hastalar evre I-IV olarak "
+        "sınıflandırılmıştı."
+    )
+
+    result = RuleExtractor().match_variables(
+        document, BriefProposal(), (_stage_column(),)
+    )
+
+    assert result == ()
+
+
+def test_kind_claim_does_not_fire_from_a_stated_limitation() -> None:
+    """A limitation sentence typically describes something that was NOT
+    done, or done informally — not this study's own method statement."""
+    document = make_document(
+        "Yöntem\nÇalışmanın bir kısıtlılığı, evre bilgisinin standart bir "
+        "sınıflandırma sistemine göre kaydedilmemiş olmasıdır."
+    )
+
+    result = RuleExtractor().match_variables(
+        document, BriefProposal(), (_stage_column(),)
+    )
+
+    assert result == ()
+
+
+def test_kind_claim_requires_the_bare_column_name_not_a_suffixed_turkish_form() -> None:
+    """KNOWN, ACCEPTED SCOPE LIMIT — read before widening the match.
+
+    Turkish is agglutinative: "evre" + the dative suffix "-sine" glues into
+    one token, "evresine", with no word boundary between the stem and the
+    suffix for a plain regex to find. A prefix match (`evre\\w*`) would
+    catch this, but it would ALSO catch unrelated words that happen to
+    start with the same stem — "evrensel" ("universal"), "evrimsel"
+    ("evolutionary") — which is exactly the class of false positive this
+    engine treats as worse than staying silent (spec §5). So the match is
+    exact-word-only, and this real, common phrasing is a miss:
+    the column is simply not reachable through this sentence, the same
+    accepted-narrowness shape as Task 6's yaş/hastanin_yasi finding.
+    """
+    document = make_document(
+        "Yöntem\nHastalar TNM evresine göre I-IV olarak sınıflandırıldı."
+    )
+
+    result = RuleExtractor().match_variables(
+        document, BriefProposal(), (_stage_column(),)
+    )
+
+    assert result == ()
+
+
+def test_kind_claim_is_silent_when_the_column_name_never_appears() -> None:
+    document = make_document("Yöntem\nHastalar yaşa göre iki gruba ayrıldı.")
+
+    result = RuleExtractor().match_variables(
+        document, BriefProposal(), (_stage_column(name="merkez_no"),)
+    )
+
+    assert result == ()
