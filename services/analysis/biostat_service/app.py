@@ -23,7 +23,13 @@ from uvicorn import Config, Server
 from .analyses import AnalysisBundle, run_plan
 from .contracts import AnalysisPlan, StudyBrief, VariableRole
 from .data_intake import DataProfile, canonicalize_frame_columns, profile_excel
-from .extractors.contracts import EVIDENCE_MAX_CHARS, BriefProposal, Proposal
+from .extractors.contracts import (
+    EVIDENCE_MAX_CHARS,
+    BriefProposal,
+    Proposal,
+    RoleProposal,
+    column_summaries,
+)
 from .extractors.rule import RuleExtractor
 from .methodology_intake import (
     MAX_DOCUMENT_CHARS,
@@ -49,6 +55,11 @@ from .projects import (
 from .reporting import build_results_docx
 from .security import require_loopback, require_session, session_token
 from .visuals import FigureArtifact, build_figures
+from .variable_reconciliation import (
+    ConflictCost,
+    detect_conflicts,
+    price_conflicts,
+)
 
 
 API_VERSION = 1
@@ -306,6 +317,13 @@ def _profile_payload(profile: DataProfile) -> dict[str, Any]:
     }
 
 
+def _bounded_evidence(evidence: str | None) -> str | None:
+    """Apply the last HTTP-boundary cap to any evidence-bearing payload."""
+    if evidence is not None and len(evidence) > EVIDENCE_MAX_CHARS:
+        return f"{evidence[:EVIDENCE_MAX_CHARS]}…"
+    return evidence
+
+
 def _proposal_payload(proposal: Proposal | None) -> dict[str, Any] | None:
     """Serialize one proposal, capping evidence before it leaves the process.
 
@@ -317,16 +335,68 @@ def _proposal_payload(proposal: Proposal | None) -> dict[str, Any] | None:
     """
     if proposal is None:
         return None
-    evidence = proposal.evidence
-    if evidence is not None and len(evidence) > EVIDENCE_MAX_CHARS:
-        evidence = f"{evidence[:EVIDENCE_MAX_CHARS]}…"
     return {
         "value": proposal.value,
         "confidence": proposal.confidence,
-        "evidence": evidence,
+        "evidence": _bounded_evidence(proposal.evidence),
         "evidence_offset": proposal.evidence_offset,
         "source": proposal.source,
     }
+
+
+def _role_proposal_payload(proposal: RoleProposal) -> dict[str, Any]:
+    return {
+        "column": proposal.column,
+        "role": _proposal_payload(proposal.role),
+        "kind": _proposal_payload(proposal.kind),
+    }
+
+
+def _conflict_payload(conflict: ConflictCost) -> dict[str, Any]:
+    return {
+        "column": conflict.column,
+        "data_kind": conflict.data_kind,
+        "document_kind": conflict.document_kind,
+        "evidence": _bounded_evidence(conflict.evidence),
+        "evidence_offset": conflict.evidence_offset,
+        "methods_if_document": list(conflict.methods_if_document),
+        "methods_if_data": list(conflict.methods_if_data),
+        "blocked_if_document": list(conflict.blocked_if_document),
+        "blocked_if_data": list(conflict.blocked_if_data),
+    }
+
+
+def _proposed_roles(
+    context: ProjectContext, proposals: tuple[RoleProposal, ...]
+) -> dict[str, VariableRole]:
+    """Build an unconfirmed machine snapshot for planner-only pricing."""
+    expected = {
+        **{name: "outcome" for name in context.brief.outcome_variables},
+        **{name: "exposure" for name in context.brief.exposure_variables},
+        **{name: "covariate" for name in context.brief.covariates},
+    }
+    if context.brief.pair_id_variable:
+        expected[context.brief.pair_id_variable] = "pair_id"
+    roles = {
+        name: VariableRole(
+            name=name,
+            role=expected.get(name, "none"),
+            kind=metadata.kind,
+            confirmed=False,
+        )
+        for name, metadata in context.profile.variables.items()
+    }
+    for proposal in proposals:
+        current = roles.get(proposal.column)
+        if current is None:
+            continue
+        roles[proposal.column] = current.model_copy(
+            update={
+                "role": proposal.role.value if proposal.role is not None else current.role,
+                "kind": proposal.kind.value if proposal.kind is not None else current.kind,
+            }
+        )
+    return roles
 
 
 def _brief_proposal_payload(brief: BriefProposal) -> dict[str, Any]:
@@ -680,6 +750,36 @@ def create_app() -> FastAPI:
                 {"type": "methodology_document_attached", "actor": "user"},
             )
         return {"attached": True}
+
+    @v1.post("/projects/{project_id}/variable-proposals")
+    def variable_proposals(project_id: UUID) -> dict[str, Any]:
+        context = _get_context(projects, project_id)
+        if context.methodology is None:
+            return {"proposals": [], "conflicts": []}
+        document = MethodologyDocument(
+            source_sha256=context.methodology.source_sha256,
+            source_format=context.methodology.source_format,
+            text=context.methodology.text,
+            char_count=context.methodology.char_count,
+            truncated=context.methodology.truncated,
+            warnings=(),
+        )
+        engine = RuleExtractor()
+        concepts = engine.extract_brief(document)
+        proposals = engine.match_variables(
+            document, concepts, column_summaries(context.profile)
+        )
+        roles = _proposed_roles(context, proposals)
+        conflicts = price_conflicts(
+            context.brief,
+            context.profile,
+            roles,
+            detect_conflicts(context.profile, proposals),
+        )
+        return {
+            "proposals": [_role_proposal_payload(item) for item in proposals],
+            "conflicts": [_conflict_payload(item) for item in conflicts],
+        }
 
     @v1.post("/projects/open")
     def open_local_project(request: OpenProjectRequest) -> dict[str, Any]:

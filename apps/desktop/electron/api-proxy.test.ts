@@ -104,3 +104,20 @@ it("allows attaching a methodology document to an open project", async () => {
     body: { text: "Yöntem", source_sha256: "a".repeat(64), source_format: "docx", original_name: "y.docx", char_count: 6, truncated: false },
   })).resolves.toEqual({ ok: true, status: 200, body: { attached: true } });
 });
+
+it("allows requesting variable proposals for one open project", async () => {
+  const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ proposals: [], conflicts: [] }), { status: 200 }));
+  const proxy = createAuthenticatedApiProxy(
+    () => ({ apiBase: "http://127.0.0.1:4040", token: "secret" }), request,
+  );
+  const uuid = "11111111-1111-4111-8111-111111111111";
+
+  await expect(proxy({
+    method: "POST",
+    path: `/v1/projects/${uuid}/variable-proposals`,
+  })).resolves.toEqual({
+    ok: true,
+    status: 200,
+    body: { proposals: [], conflicts: [] },
+  });
+});

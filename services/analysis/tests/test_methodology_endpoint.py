@@ -310,3 +310,59 @@ def test_project_created_with_a_methodology_document_attaches_it(
     context = client.app.state.projects[UUID(project_id)]
     assert context.methodology is not None
     assert context.methodology.original_name == "yontem-created.docx"
+
+
+def test_variable_proposals_price_a_document_data_conflict(
+    client: TestClient, tmp_path: Path
+) -> None:
+    workbook_path = tmp_path / "staging.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["evre", "sonuc"])
+    for stage in range(1, 5):
+        workbook.active.append([stage, stage * 10])
+    workbook.save(workbook_path)
+    methodology = {
+        "text": (
+            "Yöntem\nBirincil sonlanım sonuc olarak belirlendi. "
+            "Maruziyet evre olarak tanımlandı. "
+            "Hastalar evre I-IV olarak sınıflandırıldı."
+        ),
+        "source_sha256": "d" * 64,
+        "source_format": "docx",
+        "original_name": "evre-yontem.docx",
+        "char_count": 127,
+        "truncated": False,
+    }
+    create_response = client.post(
+        "/v1/projects",
+        json={
+            "source_path": str(workbook_path),
+            "project_root": str(tmp_path / "staging.biostat"),
+            "brief": {
+                "title": "Evre ve sonuç",
+                "question": "Evre ile sonuç arasında ilişki var mı?",
+                "hypothesis": "İleri evre daha kötü sonuçla ilişkilidir.",
+                "design": "cohort",
+                "outcome_variables": ["sonuc"],
+                "exposure_variables": ["evre"],
+            },
+            "methodology": methodology,
+        },
+        headers=headers(),
+    )
+    project_id = create_response.json()["id"]
+
+    response = client.post(
+        f"/v1/projects/{project_id}/variable-proposals", headers=headers()
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(item["column"] == "evre" for item in body["proposals"])
+    conflict = next(item for item in body["conflicts"] if item["column"] == "evre")
+    assert conflict["methods_if_document"] == ["descriptive_summary", "welch_anova"]
+    assert conflict["methods_if_data"] == [
+        "descriptive_summary",
+        "pearson_or_spearman",
+    ]
+    assert "sınıflandırıldı" in conflict["evidence"]

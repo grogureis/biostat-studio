@@ -17,6 +17,7 @@ const API_CAPABILITIES: ReadonlyArray<{ method: ApiRequest["method"]; route: Reg
   // no capability injection — the source_path/project_root/destination
   // rejection below already keeps a filesystem path out of this body.
   { method: "POST", route: new RegExp(`^/v1/projects/${UUID}/methodology$`) },
+  { method: "POST", route: new RegExp(`^/v1/projects/${UUID}/variable-proposals$`) },
   { method: "GET", route: new RegExp(`^/v1/jobs/${UUID}$`) },
   { method: "POST", route: new RegExp(`^/v1/jobs/${UUID}/cancel$`) },
 ];
