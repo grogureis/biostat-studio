@@ -10,7 +10,14 @@ from __future__ import annotations
 import re
 
 from ..methodology_intake import MethodologyDocument, select_relevant_text
-from .contracts import EVIDENCE_MAX_CHARS, BriefProposal, Proposal
+from .contracts import (
+    EVIDENCE_MAX_CHARS,
+    BriefProposal,
+    ColumnSummary,
+    Proposal,
+    RoleProposal,
+)
+from .matching import best_column
 
 
 # Modele/kurala giden metin bütçesi. 12_000 karakter ~3 sayfa yoğun metin;
@@ -260,6 +267,36 @@ class RuleExtractor:
             ),
             warnings=warnings,
         )
+
+    def match_variables(
+        self,
+        document: MethodologyDocument,
+        concepts: BriefProposal,
+        columns: tuple[ColumnSummary, ...],
+    ) -> tuple[RoleProposal, ...]:
+        """Map extracted concepts onto workbook columns. Silence over guessing."""
+        proposals: dict[str, RoleProposal] = {}
+        for role, group in (
+            ("outcome", concepts.outcome_concepts),
+            ("exposure", concepts.exposure_concepts),
+            ("covariate", concepts.covariate_concepts),
+        ):
+            for concept in group:
+                match = best_column(concept.value, columns)
+                if match is None or match[0] in proposals:
+                    continue
+                name, score = match
+                proposals[name] = RoleProposal(
+                    column=name,
+                    role=Proposal(
+                        value=role,
+                        confidence=score,
+                        source=self.name,
+                        evidence=concept.evidence,
+                        evidence_offset=concept.evidence_offset,
+                    ),
+                )
+        return tuple(proposals[name] for name in sorted(proposals))
 
     def _design(self, original_text: str, text: str) -> Proposal | None:
         # Pick the pattern whose match starts EARLIEST in `text`, not the
