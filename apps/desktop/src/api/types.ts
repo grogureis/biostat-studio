@@ -163,6 +163,13 @@ export interface ConflictDto {
 export interface VariableProposalResponse {
   proposals: RoleProposalDto[];
   conflicts: ConflictDto[];
+  engine?: MethodologyEngineStatus;
+}
+
+export interface MethodologyEngineStatus {
+  requested: string;
+  used: string;
+  fallback_reason: string | null;
 }
 
 /** Mirrors BriefProposal in services/analysis/biostat_service/extractors/contracts.py — all eight fields. */
@@ -193,4 +200,5 @@ export interface MethodologyExtraction {
   text: string;
   warnings: string[];
   brief: BriefProposalDto;
+  engine?: MethodologyEngineStatus;
 }

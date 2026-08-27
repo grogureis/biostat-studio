@@ -70,7 +70,10 @@ export interface JobResponse {
 // MethodologyPayload / MethodologyRecord in the Python service).
 function methodologyDocument(extraction: MethodologyExtraction) {
   const { text, source_sha256, source_format, original_name, char_count, truncated } = extraction;
-  return { text, source_sha256, source_format, original_name, char_count, truncated };
+  return {
+    text, source_sha256, source_format, original_name, char_count, truncated,
+    ...(extraction.engine?.used ? { extraction_engine: extraction.engine.used } : {}),
+  };
 }
 
 const safeError = (): Error => new Error("The local analysis service could not complete this operation.");

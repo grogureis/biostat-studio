@@ -280,6 +280,27 @@ const cohortExtraction: MethodologyExtraction = {
   },
 };
 
+const localAiExtraction: MethodologyExtraction = {
+  source_sha256: "b".repeat(64),
+  source_format: "docx",
+  original_name: "methods.docx",
+  char_count: 400,
+  truncated: false,
+  text: "Methods\nProspective cohort study of student notification and clinical deterioration.",
+  warnings: [],
+  engine: { requested: "local:qwen2.5:14b", used: "local:qwen2.5:14b", fallback_reason: null },
+  brief: {
+    title: { value: "Student notification and deterioration", confidence: 0.79, evidence: "student notification and clinical deterioration", evidence_offset: 36, source: "local:qwen2.5:14b" },
+    question: { value: "Is student notification associated with deterioration?", confidence: 0.79, evidence: "student notification and clinical deterioration", evidence_offset: 36, source: "local:qwen2.5:14b" },
+    hypothesis: { value: "Student notification is associated with deterioration.", confidence: 0.79, evidence: "student notification and clinical deterioration", evidence_offset: 36, source: "local:qwen2.5:14b" },
+    design: { value: "cohort", confidence: 0.79, evidence: "Prospective cohort study", evidence_offset: 8, source: "local:qwen2.5:14b" },
+    outcome_concepts: [{ value: "clinical deterioration", confidence: 0.79, evidence: "clinical deterioration", evidence_offset: 61, source: "local:qwen2.5:14b" }],
+    exposure_concepts: [{ value: "student notification", confidence: 0.79, evidence: "student notification", evidence_offset: 36, source: "local:qwen2.5:14b" }],
+    covariate_concepts: [{ value: "age", confidence: 0.79, evidence: "student notification and clinical deterioration", evidence_offset: 36, source: "local:qwen2.5:14b" }],
+    warnings: [],
+  },
+};
+
 /** Holds the brief the way App.tsx does, so onChange actually feeds `value` back. */
 function Harness({ api }: { api: AnalysisApi }) {
   const [brief, setBrief] = useState<StudyBriefDto>(emptyBrief);
@@ -293,6 +314,40 @@ function Harness({ api }: { api: AnalysisApi }) {
     </>
   );
 }
+
+it("atomically fills every study-brief field from local AI proposals", async () => {
+  const user = userEvent.setup();
+  const api = makeApi({ extractMethodology: vi.fn(async () => localAiExtraction) });
+  render(<Harness api={api} />);
+
+  await user.click(screen.getByRole("button", { name: /metodoloji dokümanı/i }));
+
+  await screen.findByText(/yerel yapay zekâ önerileri hazırladı/i);
+  const brief = JSON.parse(screen.getByTestId("brief-state").textContent ?? "{}") as StudyBriefDto;
+  expect(brief).toMatchObject({
+    title: "Student notification and deterioration",
+    question: "Is student notification associated with deterioration?",
+    hypothesis: "Student notification is associated with deterioration.",
+    design: "cohort",
+    outcome_variables: ["clinical deterioration"],
+    exposure_variables: ["student notification"],
+    covariates: ["age"],
+  });
+});
+
+it("shows a visible limited-rule fallback when local AI is unavailable", async () => {
+  const user = userEvent.setup();
+  const fallback = {
+    ...cohortExtraction,
+    engine: { requested: "local:qwen2.5:14b", used: "rule", fallback_reason: "local_llm_unavailable" },
+  } satisfies MethodologyExtraction;
+  render(<StudyBrief value={emptyBrief} onChange={vi.fn()} language="tr" api={makeApi({ extractMethodology: vi.fn(async () => fallback) })} />);
+
+  await user.click(screen.getByRole("button", { name: /metodoloji dokümanı/i }));
+
+  expect(await screen.findByText(/sınırlı kural tabanlı öneriler/i)).toBeInTheDocument();
+  expect(screen.getByText(/Ollama uygulamasını açın/i)).toBeInTheDocument();
+});
 
 it("drops the from-document badge once the user edits the proposed field", async () => {
   const user = userEvent.setup();

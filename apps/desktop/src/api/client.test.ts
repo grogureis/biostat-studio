@@ -9,6 +9,7 @@ const extraction = {
   char_count: 10,
   truncated: false,
   warnings: [] as string[],
+  engine: { requested: "local:qwen2.5:14b", used: "local:qwen2.5:14b", fallback_reason: null },
   brief: {
     title: null, question: null, hypothesis: null, design: null,
     outcome_concepts: [], exposure_concepts: [], covariate_concepts: [], warnings: [],
@@ -323,6 +324,32 @@ describe("authenticated loopback API client", () => {
     expect(sent.at(-1)?.body).toEqual({ source_capability: "cap-1" });
     expect(result).toEqual(extraction);
     expect(result.brief.warnings).toEqual([]);
+  });
+
+  it("persists only the used extraction engine, never the prompt or model response", async () => {
+    const requests: Array<{ path: string; body?: unknown }> = [];
+    const requestApi = vi.fn(async (request: { path: string; body?: unknown }) => {
+      requests.push(request);
+      if (request.path === "/v1/projects") return { ok: true, status: 200, body: { id: "project-1" } };
+      return { ok: true, status: 200, body: { proposals: [], conflicts: [] } };
+    });
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn().mockResolvedValue({ profileCapability: "profile", importCapability: "import", displayName: "study.xlsx" }),
+      selectMethodologyDocument: vi.fn(),
+      selectProject: vi.fn().mockResolvedValue({ id: "project", displayName: "study.biostat" }),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    });
+
+    await api.selectDataFile();
+    await api.prepareDataStructure!(brief, extraction as never);
+
+    const projectRequest = requests.find((request) => request.path === "/v1/projects");
+    expect(projectRequest?.body).toMatchObject({
+      methodology: { extraction_engine: "local:qwen2.5:14b" },
+    });
+    expect(JSON.stringify(projectRequest?.body)).not.toContain("prompt");
+    expect(JSON.stringify(projectRequest?.body)).not.toContain("model_response");
   });
 
   it("treats the methodology capability as single-use and rejects a second extraction locally", async () => {

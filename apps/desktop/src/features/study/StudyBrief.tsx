@@ -49,6 +49,9 @@ const text = {
     importing: "Importing document…",
     uploadHelp: "Word, PDF, text or markdown. Fields below are filled as suggestions you can change.",
     proposed: "from document",
+    localAi: "Local AI prepared these suggestions; data stayed on this Mac.",
+    ruleFallback: "Local AI was unavailable; limited rule-based suggestions are shown.",
+    ruleFallbackAction: "Open the Ollama app, then select the document again for fuller suggestions.",
     truncated: "The document was long, so only its first part was read.",
     noSection: "No methods section was found; the beginning of the document was used.",
     errors: {
@@ -78,6 +81,9 @@ const text = {
     importing: "Doküman yükleniyor…",
     uploadHelp: "Word, PDF, metin veya markdown. Aşağıdaki alanlar öneri olarak doldurulur, değiştirebilirsiniz.",
     proposed: "dokümandan",
+    localAi: "Yerel yapay zekâ önerileri hazırladı; veriler bu Mac'ten çıkmadı.",
+    ruleFallback: "Yerel yapay zekâ kullanılamadı; sınırlı kural tabanlı öneriler gösteriliyor.",
+    ruleFallbackAction: "Daha kapsamlı öneriler için Ollama uygulamasını açın ve dokümanı yeniden seçin.",
     truncated: "Doküman uzun olduğu için yalnızca ilk kısmı okundu.",
     noSection: "Yöntem bölümü bulunamadı; dokümanın başı kullanıldı.",
     errors: {
@@ -125,16 +131,6 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
     onChange({ ...latest.current, [key]: next });
   };
 
-  const applyDocumentProposal = <Key extends keyof StudyBriefDto>(key: Key, next: StudyBriefDto[Key], evidence: string | null) => {
-    setFromDocument((current) => {
-      const changed = new Set(current);
-      if (evidence) changed.add(key);
-      else changed.delete(key);
-      return changed;
-    });
-    onChange({ ...latest.current, [key]: next });
-  };
-
   const [documentName, setDocumentName] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<MethodologyExtraction | null>(null);
   const [fromDocument, setFromDocument] = useState<Set<keyof StudyBriefDto>>(() => new Set());
@@ -156,12 +152,28 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
       const name = await api.selectMethodologyDocument();
       if (!name) return;
       setDocumentName(name);
+      const beforeExtraction = latest.current;
       const result = await api.extractMethodology();
       setExtraction(result);
       onMethodology?.(result);
-      if (result.brief.design) {
-        applyDocumentProposal("design", result.brief.design.value as StudyDesign, result.brief.design.evidence);
-      }
+      const current = latest.current;
+      const next: StudyBriefDto = { ...current };
+      const proposed = new Set<keyof StudyBriefDto>();
+      const apply = <Key extends keyof StudyBriefDto>(key: Key, value: StudyBriefDto[Key], evidence: string | null) => {
+        if (current[key] !== beforeExtraction[key]) return;
+        next[key] = value;
+        if (evidence) proposed.add(key);
+      };
+      if (result.brief.title) apply("title", result.brief.title.value, result.brief.title.evidence);
+      if (result.brief.question) apply("question", result.brief.question.value, result.brief.question.evidence);
+      if (result.brief.hypothesis) apply("hypothesis", result.brief.hypothesis.value, result.brief.hypothesis.evidence);
+      if (result.brief.design) apply("design", result.brief.design.value as StudyDesign, result.brief.design.evidence);
+      if (result.brief.outcome_concepts.length) apply("outcome_variables", result.brief.outcome_concepts.map(({ value }) => value), result.brief.outcome_concepts[0]?.evidence ?? null);
+      if (result.brief.exposure_concepts.length) apply("exposure_variables", result.brief.exposure_concepts.map(({ value }) => value), result.brief.exposure_concepts[0]?.evidence ?? null);
+      if (result.brief.covariate_concepts.length) apply("covariates", result.brief.covariate_concepts.map(({ value }) => value), result.brief.covariate_concepts[0]?.evidence ?? null);
+      setFromDocument(proposed);
+      latest.current = next;
+      onChange(next);
     } catch (error) {
       // Ruling 1: extractMethodology() clears its capability reference before
       // sending, so ANY failure here — including a transient one — leaves the
@@ -191,6 +203,8 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
           <p className="form-help" id="methodology-upload-help">{copy.uploadHelp}</p>
           {extraction?.truncated ? <p className="warning-line">{copy.truncated}</p> : null}
           {extraction?.warnings.includes("no_method_section") ? <p className="warning-line">{copy.noSection}</p> : null}
+          {extraction?.engine?.used.startsWith("local:") ? <p className="form-help" role="status">{copy.localAi}</p> : null}
+          {extraction?.engine?.used === "rule" ? <><p className="warning-line" role="status">{copy.ruleFallback}</p><p className="form-help">{copy.ruleFallbackAction}</p></> : null}
         </div>
         <button
           type="button"
@@ -211,7 +225,7 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
 
       <form className="study-form" onSubmit={(event) => event.preventDefault()}>
         <div className="field field-wide">
-          <label htmlFor="project-title">{copy.projectTitle}</label>
+          <label htmlFor="project-title">{copy.projectTitle}{fromDocument.has("title") && extraction?.brief.title?.evidence ? <span className="proposal-badge" title={extraction.brief.title.evidence}>{copy.proposed}</span> : null}</label>
           <input
             id="project-title"
             value={value.title}
@@ -221,7 +235,7 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
           />
         </div>
         <div className="field field-wide">
-          <label htmlFor="research-question">{copy.question}</label>
+          <label htmlFor="research-question">{copy.question}{fromDocument.has("question") && extraction?.brief.question?.evidence ? <span className="proposal-badge" title={extraction.brief.question.evidence}>{copy.proposed}</span> : null}</label>
           <textarea
             id="research-question"
             required
@@ -233,7 +247,7 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
           />
         </div>
         <div className="field field-wide">
-          <label htmlFor="hypothesis">{copy.hypothesis}</label>
+          <label htmlFor="hypothesis">{copy.hypothesis}{fromDocument.has("hypothesis") && extraction?.brief.hypothesis?.evidence ? <span className="proposal-badge" title={extraction.brief.hypothesis.evidence}>{copy.proposed}</span> : null}</label>
           <textarea
             id="hypothesis"
             required
@@ -261,15 +275,15 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
           ) : null}
         </div>
         <div className="field">
-          <label htmlFor="outcomes">{copy.outcomes}</label>
+          <label htmlFor="outcomes">{copy.outcomes}{fromDocument.has("outcome_variables") && extraction?.brief.outcome_concepts[0]?.evidence ? <span className="proposal-badge" title={extraction.brief.outcome_concepts[0].evidence ?? ""}>{copy.proposed}</span> : null}</label>
           <input id="outcomes" value={listValue(value.outcome_variables)} disabled={busy} onChange={(event) => update("outcome_variables", parseList(event.target.value))} aria-describedby="variable-list-help" />
         </div>
         <div className="field">
-          <label htmlFor="exposures">{copy.exposures}</label>
+          <label htmlFor="exposures">{copy.exposures}{fromDocument.has("exposure_variables") && extraction?.brief.exposure_concepts[0]?.evidence ? <span className="proposal-badge" title={extraction.brief.exposure_concepts[0].evidence ?? ""}>{copy.proposed}</span> : null}</label>
           <input id="exposures" value={listValue(value.exposure_variables)} disabled={busy} onChange={(event) => update("exposure_variables", parseList(event.target.value))} aria-describedby="variable-list-help" />
         </div>
         <div className="field">
-          <label htmlFor="covariates">{copy.covariates}</label>
+          <label htmlFor="covariates">{copy.covariates}{fromDocument.has("covariates") && extraction?.brief.covariate_concepts[0]?.evidence ? <span className="proposal-badge" title={extraction.brief.covariate_concepts[0].evidence ?? ""}>{copy.proposed}</span> : null}</label>
           <input id="covariates" value={listValue(value.covariates)} disabled={busy} onChange={(event) => update("covariates", parseList(event.target.value))} aria-describedby="variable-list-help" />
         </div>
         <p id="variable-list-help" className="form-help field-wide">{copy.listHelp}</p>
