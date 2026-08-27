@@ -12,8 +12,11 @@ veri/doküman sınıflandırmasını açıkça seçiyor. Dokümandan gelen tasar
 kanıtı, kullanıcı alanı düzenlediğinde düşüyor.
 
 RED ölçümü 19/21 geçer ve iki beklenen kırık; GREEN/tam kapı ölçümü Python
-326 geçti + 1 skip, desktop 76/76, typecheck ve diff kontrolü temiz. Final dal taramasında
-yeni Critical/Important bulgu yok. Plan 3'e devredilen iki ölçülmüş sınır açık:
+327 geçti + 1 skip, desktop 76/76, typecheck ve diff kontrolü temiz. Final dal taraması
+bir mevcut terminal-durum/audit yarışı yakaladı: istemci `cancelled` durumunu kalıcı
+audit callback'i bitmeden görebiliyordu. Deterministik RED testle doğrulandı ve `92e8a52`
+ile terminal durum callback sonrasına alındı; yeni açık Critical/Important bulgu yok.
+Plan 3'e devredilen iki ölçülmüş sınır açık:
 kalibre edilmemiş/dar kavram-sütun eşleştirme ve Türkçe fiil-sonu kovaryat cümlelerinde
 kural motorunun bilinçli sessizliği. Paketli uygulamada gerçek Excel ile GUI operatör kabul
 testi de ayrı bir ürün kapısı olarak açık.
