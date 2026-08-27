@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
-from threading import Event, Lock
+from threading import Event, RLock
 from typing import Any, Callable, Literal, Union
 from uuid import UUID, uuid4
 
@@ -98,7 +98,21 @@ class JobManager:
         self._futures: dict[UUID, Future[None]] = {}
         self._languages: dict[UUID, JobLanguage] = {}
         self._terminal_callbacks: dict[UUID, TerminalCallback] = {}
-        self._lock = Lock()
+        self._lock = RLock()
+
+    def _publish_terminal(
+        self,
+        job_id: UUID,
+        terminal: JobState,
+        callback: TerminalCallback | None,
+    ) -> None:
+        """Expose terminal state only after its durable callback has finished."""
+        with self._lock:
+            try:
+                if callback is not None:
+                    callback(terminal)
+            finally:
+                self._jobs[job_id] = terminal
 
     def submit(
         self,
@@ -127,16 +141,14 @@ class JobManager:
         with self._lock:
             cancelled = self._cancelled[job_id]
             if cancelled.is_set():
-                self._jobs[job_id] = replace(self._jobs[job_id], status="cancelled", progress=100)
-                state = self._jobs[job_id]
+                state = replace(self._jobs[job_id], status="cancelled", progress=100)
                 callback = self._terminal_callbacks.pop(job_id, None)
                 early_terminal = (state, callback)
             else:
                 self._jobs[job_id] = replace(self._jobs[job_id], status="running", progress=10)
         if early_terminal is not None:
             state, callback = early_terminal
-            if callback is not None:
-                callback(state)
+            self._publish_terminal(job_id, state, callback)
             return
         try:
             def update_progress(progress: int, stage: str) -> None:
@@ -157,7 +169,7 @@ class JobManager:
             error_code, diagnostics = _safe_failure(error)
             with self._lock:
                 state = self._jobs[job_id]
-                self._jobs[job_id] = replace(
+                terminal = replace(
                     state,
                     status="cancelled" if cancelled.is_set() else "failed",
                     error_code=None if cancelled.is_set() else error_code,
@@ -169,26 +181,24 @@ class JobManager:
                     progress=100,
                     diagnostics=() if cancelled.is_set() else diagnostics,
                 )
-                terminal = self._jobs[job_id]
                 callback = self._terminal_callbacks.pop(job_id, None)
-            if callback is not None:
-                callback(terminal)
+            self._publish_terminal(job_id, terminal, callback)
             return
         staged = prepared if isinstance(prepared, StagedJobResult) else StagedJobResult(
             result=prepared, publish=lambda: None, cleanup=lambda: None
         )
-        try:
-            with self._lock:
+        with self._lock:
+            try:
                 state = self._jobs[job_id]
                 if cancelled.is_set():
-                    self._jobs[job_id] = replace(
+                    terminal = replace(
                         state, status="cancelled", result=None, message=None, progress=100
                     )
                 else:
                     try:
                         staged.publish()
                     except Exception:
-                        self._jobs[job_id] = replace(
+                        terminal = replace(
                             state,
                             status="failed",
                             result=None,
@@ -200,19 +210,20 @@ class JobManager:
                             ),
                         )
                     else:
-                        self._jobs[job_id] = replace(
+                        terminal = replace(
                             state, status="completed", result=staged.result, progress=100
                         )
-        finally:
-            try:
-                staged.cleanup()
-            except OSError:
-                pass
-        with self._lock:
-            terminal = self._jobs[job_id]
+            finally:
+                try:
+                    staged.cleanup()
+                except OSError:
+                    pass
             callback = self._terminal_callbacks.pop(job_id, None)
-        if callback is not None:
-            callback(terminal)
+            try:
+                if callback is not None:
+                    callback(terminal)
+            finally:
+                self._jobs[job_id] = terminal
 
     def get(self, job_id: UUID) -> JobState:
         with self._lock:
