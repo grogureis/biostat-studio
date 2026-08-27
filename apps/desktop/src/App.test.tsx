@@ -402,6 +402,23 @@ describe("Clinical Calm workflow", () => {
     expect(api.invalidateProject).not.toHaveBeenCalled();
   });
 
+  it("keeps an unapproved Excel profile when the user visits power planning and returns", async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi()} />);
+
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+    await user.click(screen.getByRole("button", { name: "Import Excel" }));
+    expect(await screen.findByText("12 observations")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Variable structure" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Power & sample size" }));
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+
+    expect(screen.getByText("12 observations")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Variable structure" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accept remaining clear variables" })).toBeEnabled();
+  });
+
   it("localizes the power planner and shows a safe failure message", async () => {
     const api = fakeApi({
       computePower: vi.fn().mockRejectedValue(new AnalysisApiError("invalid_alpha", "invalid")),

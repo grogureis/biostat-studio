@@ -24,6 +24,34 @@ describe("authenticated main-process API proxy", () => {
     await expect(proxy({ path: "/health", method: "GET" })).rejects.toThrow("Invalid API request");
     await expect(proxy({ path: "/v1/unapproved-capability", method: "GET" })).rejects.toThrow("Invalid API request");
   });
+
+  it("allows the stateless power calculator through the desktop boundary", async () => {
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      analysis: "two_sample_t",
+      solve_for: "sample_size",
+      per_group_rounded: 64,
+      total_rounded: 128,
+    }), { status: 200 }));
+    const proxy = createAuthenticatedApiProxy(
+      () => ({ apiBase: "http://127.0.0.1:4040", token: "main-only-secret" }),
+      request,
+    );
+
+    await expect(proxy({
+      path: "/v1/power",
+      method: "POST",
+      body: {
+        analysis: "two_sample_t",
+        solve_for: "sample_size",
+        alpha: 0.05,
+        power: 0.8,
+        effect_size: 0.5,
+      },
+    })).resolves.toMatchObject({
+      ok: true,
+      body: { per_group_rounded: 64, total_rounded: 128 },
+    });
+  });
 });
 
 it("injects main-owned paths and rejects renderer-supplied raw paths", async () => {

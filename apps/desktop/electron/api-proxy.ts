@@ -10,7 +10,7 @@ const API_CAPABILITIES: ReadonlyArray<{ method: ApiRequest["method"]; route: Reg
   { method: "GET", route: /^\/v1\/session$/ },
   {
     method: "POST",
-    route: /^\/v1\/(?:data\/profile|methodology\/extract|projects|projects\/open|plans|plans\/approval|jobs|reports)$/,
+    route: /^\/v1\/(?:data\/profile|methodology\/extract|power|projects|projects\/open|plans|plans\/approval|jobs|reports)$/,
   },
   { method: "POST", route: new RegExp(`^/v1/projects/${UUID}/data-approval$`) },
   // Carries extracted text, not a path, so unlike the routes above it needs

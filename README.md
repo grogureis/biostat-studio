@@ -164,11 +164,12 @@ The current package is ad-hoc signed and not notarized because no Apple Develope
 ## Current validation
 
 - Python scientific/service suite: **349 passed, 1 environment-gated skip**
-- Desktop suite: **85 passed**
+- Desktop suite: **87 passed**
 - TypeScript typecheck and production build: passed
 - Packaged arm64 renderer/preload, bundled sidecar, strict ad-hoc signature, and DMG checksum gates: passed
 - Real `Methods_Section.docx` plus the 500×54 `PassiveSurveillance.xlsx`: correct primary outcome/exposure/covariate matching with local `qwen2.5:14b`, both from source and from the service bundled inside the DMG
 - Packaged-GUI acceptance with the real workbook: passed. Excel profiling remains visible while the user names the local `.biostat` project, then 500 observations, 54 variables, and the matched roles are shown for explicit human review.
+- Unapproved Excel profiles now survive a visit to the independent power calculator, and the packaged desktop security boundary explicitly permits the local `/v1/power` calculation route.
 - English/Turkish DOCX numerical parity and visual render review: passed
 - English/Turkish DOCX accessibility audit: 0 high, 0 medium, 0 low findings
 

@@ -3,6 +3,28 @@
 **Son güncelleme:** 2026-08-27 · Codex App
 **Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio` (Plan 3 fast-forward birleştirildi)
 
+### Power geçidi ve ekranlar arası Excel durumu düzeltildi — 2026-08-27
+
+Paketli uygulamada kullanıcı akışıyla iki ayrı hata yeniden üretildi. Birincisi,
+onaylanmamış Excel profili ve rol önerilerinin yalnızca `DataIntake` ekranının
+geçici React durumunda tutulmasıydı; bağımsız Power ekranına gidilince bileşen
+kapanıyor, geri dönünce dosya adı kalırken 500×54 profil kayboluyordu. Veri ekranı
+artık Power ziyareti boyunca bağlı ama gizli kalıyor; çalışma özetine dönüp veri
+bağımlılıklarını değiştirmek ise önceki sıfırlama davranışını koruyor.
+
+İkinci hata Power hesap motorunda değildi. Python referans testleri ve masaüstü
+bileşen testi geçmesine rağmen Electron ana süreç izin listesinde `/v1/power`
+yolu yoktu; paketli GUI'deki her `Compute` isteği yerel servise ulaşmadan
+`Invalid API request` ile kesiliyordu. Stateless POST yolu dar biçimde izin
+listesine alındı ve gerçek proxy davranışını ölçen regresyon testi eklendi.
+
+Taze kapılar: Python **349 geçti + 1 ortam koşullu skip**, desktop **87/87**,
+TypeScript typecheck, Vite üretim derlemesi ve `git diff --check` temiz. Yeni
+arm64 DMG; renderer/preload smoke, gömülü servis öz testi, katı ad-hoc imza ve
+`hdiutil verify` kapılarından geçti. Teslim:
+`release/BioStat Studio-0.1.0-arm64.dmg` (198.464.507 bayt), SHA-256
+`c5c1d237b472b815801a5aee82326d2fba627ba1f192e43f6b8bfa187723605e`.
+
 ### Gerçek Excel GUI alımı düzeltildi — 2026-08-27
 
 Kullanıcının gönderdiği ekran görüntüsü ve gerçek
