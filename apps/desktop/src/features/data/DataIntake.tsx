@@ -1,4 +1,4 @@
-import type { AnalysisApi } from "../../api/client";
+import { AnalysisApiError, type AnalysisApi } from "../../api/client";
 import type { ConflictDto, DataProfile, MethodologyExtraction, RoleProposalDto, StudyBrief, VariableProposalResponse, VariableRole } from "../../api/types";
 import { useState } from "react";
 import { methodLabel } from "../plan/methodLabels";
@@ -28,6 +28,9 @@ const labels = {
     approvalFailure: "Data structure approval could not be completed. Review the workbook and try again.",
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
     pickerFailure: "The workbook picker could not be opened. Try again.",
+    profileFailure: "The Excel workbook could not be read. Check that it is a valid XLSX file and try again.",
+    briefFailure: "Complete the required study-brief fields before importing Excel.",
+    matchingFailure: "The workbook was read, but the project and variable suggestions could not be prepared. Review the study brief and try again.",
     acceptRemaining: "Accept remaining clear variables",
     conflict: "Conflict for",
     conflictTitle: "Document and data disagree",
@@ -57,6 +60,9 @@ const labels = {
     approvalFailure: "Veri yapısı onayı tamamlanamadı. Çalışma kitabını gözden geçirip yeniden deneyin.",
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
     pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
+    profileFailure: "Excel dosyası okunamadı. Geçerli bir XLSX dosyası olduğunu denetleyip yeniden deneyin.",
+    briefFailure: "Excel'i içe aktarmadan önce çalışma özetindeki zorunlu alanları tamamlayın.",
+    matchingFailure: "Excel okundu; ancak proje ve değişken önerileri hazırlanamadı. Çalışma özetini gözden geçirip yeniden deneyin.",
     acceptRemaining: "Kalan uygun değişkenleri kabul et",
     conflict: "Çelişki",
     conflictTitle: "Doküman ve veri uyuşmuyor",
@@ -140,46 +146,60 @@ function ConflictChoice({
 
 export function DataIntake({ api, dataFile, approved, language, brief, methodology, onFile, onApproval }: DataIntakeProps) {
   const copy = labels[language];
-  const [pickerFailed, setPickerFailed] = useState(false);
+  const [importFailure, setImportFailure] = useState<"picker" | "profile" | "brief" | "matching" | null>(null);
   const [profile, setProfile] = useState<DataProfile | null>(null);
   const [roles, setRoles] = useState<Record<string, VariableRole>>({});
   const [approving, setApproving] = useState(false);
   const [approvalFailed, setApprovalFailed] = useState(false);
   const [proposalData, setProposalData] = useState<VariableProposalResponse>(EMPTY_PROPOSALS);
   const chooseFile = async () => {
+    let path: string | null;
     try {
-      const path = await api.selectDataFile();
-      setPickerFailed(false);
-      onFile(path);
-      const nextProfile = path && api.profileData ? await api.profileData() : null;
-      setProfile(nextProfile);
-      if (nextProfile) {
-        const nextProposals = brief && api.prepareDataStructure
-          ? await api.prepareDataStructure({ ...brief, language }, methodology ?? null)
-          : EMPTY_PROPOSALS;
-        setProposalData(nextProposals);
-        setRoles(Object.fromEntries(Object.entries(nextProfile.variables).map(([name, variable]) => {
-          let role = "none";
-          if (brief?.outcome_variables.includes(name)) role = "outcome";
-          else if (brief?.exposure_variables?.includes(name)) role = "exposure";
-          else if (brief?.covariates?.includes(name)) role = "covariate";
-          else if (brief?.pair_id_variable === name) role = "pair_id";
-          const inferred = variable.kind === "identifier-candidate" ? "identifier" : variable.kind;
-          const kind = ["continuous", "binary", "categorical", "date", "identifier"].includes(inferred) ? inferred : "exclude";
-          const proposal = nextProposals.proposals.find((item) => item.column === name);
-          const proposedRole = proposal?.role?.value;
-          const proposedKind = proposal?.kind?.value;
-          return [name, {
-            name,
-            role: proposedRole && proposedRole in labels.en.roles ? proposedRole : role,
-            kind: proposedKind && proposedKind in labels.en.kinds ? proposedKind : kind,
-            confirmed: false,
-          }];
-        })));
-      }
+      path = await api.selectDataFile();
     } catch {
-      setPickerFailed(true);
+      setImportFailure("picker");
+      return;
     }
+    setImportFailure(null);
+    onFile(path);
+    if (!path) return;
+    let nextProfile: DataProfile;
+    try {
+      if (!api.profileData) throw new Error("profile_unavailable");
+      nextProfile = await api.profileData();
+    } catch {
+      setImportFailure("profile");
+      return;
+    }
+    setProfile(nextProfile);
+    let nextProposals = EMPTY_PROPOSALS;
+    if (brief && api.prepareDataStructure) {
+      try {
+        nextProposals = await api.prepareDataStructure({ ...brief, language }, methodology ?? null);
+      } catch (error) {
+        setImportFailure(error instanceof AnalysisApiError && error.code === "validation_error" ? "brief" : "matching");
+        return;
+      }
+    }
+    setProposalData(nextProposals);
+    setRoles(Object.fromEntries(Object.entries(nextProfile.variables).map(([name, variable]) => {
+      let role = "none";
+      if (brief?.outcome_variables.includes(name)) role = "outcome";
+      else if (brief?.exposure_variables?.includes(name)) role = "exposure";
+      else if (brief?.covariates?.includes(name)) role = "covariate";
+      else if (brief?.pair_id_variable === name) role = "pair_id";
+      const inferred = variable.kind === "identifier-candidate" ? "identifier" : variable.kind;
+      const kind = ["continuous", "binary", "categorical", "date", "identifier"].includes(inferred) ? inferred : "exclude";
+      const proposal = nextProposals.proposals.find((item) => item.column === name);
+      const proposedRole = proposal?.role?.value;
+      const proposedKind = proposal?.kind?.value;
+      return [name, {
+        name,
+        role: proposedRole && proposedRole in labels.en.roles ? proposedRole : role,
+        kind: proposedKind && proposedKind in labels.en.kinds ? proposedKind : kind,
+        confirmed: false,
+      }];
+    })));
   };
   const acceptRemaining = () => {
     const conflicts = new Set(proposalData.conflicts.map((conflict) => conflict.column));
@@ -230,14 +250,19 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
           language={language}
           onChoose={(kind) => setRoles((current) => ({ ...current, [conflict.column]: { ...current[conflict.column], kind, confirmed: true } }))}
         />)}
-        {Object.entries(profile.variables).map(([name, variable]) => <article key={name} className="variable-row">
-          <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} {copy.unique}</p>
-          <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-          <label>{copy.kind} {variable.display_name}<select aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}>{Object.entries(copy.kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-        </article>)}
+        {Object.entries(profile.variables).map(([name, variable]) => {
+          const proposal = proposalData.proposals.find((item) => item.column === name);
+          const evidence = proposal?.role?.evidence ?? proposal?.kind?.evidence;
+          return <article key={name} className="variable-row">
+            <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} {copy.unique}</p>
+            {evidence ? <p className="form-help evidence-quote"><strong>{copy.evidence}:</strong> {evidence}</p> : null}
+            <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label>{copy.kind} {variable.display_name}<select aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}>{Object.entries(copy.kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          </article>;
+        })}
         {profile.warnings.length ? <div className="warning-line"><strong>{copy.warnings}</strong><ul>{profile.warnings.map((warning) => <li key={`${warning.code}:${warning.column ?? "all"}`}>{warning.message}</li>)}</ul></div> : null}
       </section> : null}
-      {pickerFailed ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{copy.pickerFailure}</p></div> : null}
+      {importFailure ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{importFailure === "picker" ? copy.pickerFailure : importFailure === "profile" ? copy.profileFailure : importFailure === "brief" ? copy.briefFailure : copy.matchingFailure}</p></div> : null}
       {approvalFailed ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{copy.approvalFailure}</p></div> : null}
       <div className="task-footer">
         <p className="microcopy">XLSX</p>

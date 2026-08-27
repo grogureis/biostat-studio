@@ -518,15 +518,6 @@ def _validated_roles(
         for role in roles.values()
     ):
         raise HTTPException(status_code=422, detail="unconfirmed_variable_roles")
-    expected = {
-        **{name: "outcome" for name in context.brief.outcome_variables},
-        **{name: "exposure" for name in context.brief.exposure_variables},
-        **{name: "covariate" for name in context.brief.covariates},
-    }
-    if context.brief.pair_id_variable:
-        expected[context.brief.pair_id_variable] = "pair_id"
-    if any(name not in roles or roles[name].role != role for name, role in expected.items()):
-        raise HTTPException(status_code=422, detail="study_role_mismatch")
     warnings_by_column = {
         (warning.column, warning.code) for warning in context.profile.warnings
     }
@@ -540,6 +531,31 @@ def _validated_roles(
         if (name, "mixed_types") in warnings_by_column and role.kind == metadata.kind:
             raise HTTPException(status_code=422, detail="unresolved_mixed_type")
     return roles
+
+
+def _brief_from_role_snapshot(
+    brief: StudyBrief, roles: dict[str, VariableRole]
+) -> StudyBrief:
+    """Replace document concepts with the exact columns in one role snapshot."""
+    outcomes = sorted(name for name, role in roles.items() if role.role == "outcome")
+    if not outcomes:
+        raise HTTPException(status_code=422, detail="outcome_role_required")
+    pair_ids = sorted(name for name, role in roles.items() if role.role == "pair_id")
+    if len(pair_ids) > 1:
+        raise HTTPException(status_code=422, detail="multiple_pair_id_variables")
+    return StudyBrief.model_validate(
+        {
+            **brief.model_dump(mode="python"),
+            "outcome_variables": outcomes,
+            "exposure_variables": sorted(
+                name for name, role in roles.items() if role.role == "exposure"
+            ),
+            "covariates": sorted(
+                name for name, role in roles.items() if role.role == "covariate"
+            ),
+            "pair_id_variable": pair_ids[0] if pair_ids else None,
+        }
+    )
 
 
 def _apply_approved_kinds(
@@ -803,8 +819,15 @@ def create_app(
         )
         proposals = variable_run.proposals
         roles = _proposed_roles(context, proposals)
+        try:
+            pricing_brief = _brief_from_role_snapshot(context.brief, roles)
+        except HTTPException:
+            # An incomplete machine snapshot is still useful for showing proposals;
+            # the human can supply the missing outcome. Preserve the prior pricing
+            # behavior instead of turning suggestions into a request failure.
+            pricing_brief = context.brief
         conflicts = price_conflicts(
-            context.brief,
+            pricing_brief,
             context.profile,
             roles,
             detect_conflicts(context.profile, proposals),
@@ -929,6 +952,7 @@ def create_app(
         with context.state_lock:
             if not context.data_structure_approved:
                 roles = _validated_roles(context, request.roles)
+                context.brief = _brief_from_role_snapshot(context.brief, roles)
                 append_audit_event(
                     context.project,
                     {"type": "data_structure_approved", "actor": "user"},

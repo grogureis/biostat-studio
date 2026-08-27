@@ -414,8 +414,11 @@ def test_variable_proposals_price_a_document_data_conflict(
                 "question": "Evre ile sonuç arasında ilişki var mı?",
                 "hypothesis": "İleri evre daha kötü sonuçla ilişkilidir.",
                 "design": "cohort",
-                "outcome_variables": ["sonuc"],
-                "exposure_variables": ["evre"],
+                # Document concepts are not workbook column names yet. Conflict
+                # pricing must use the machine role snapshot, just as the UI does
+                # before human confirmation.
+                "outcome_variables": ["clinical outcome"],
+                "exposure_variables": ["disease stage"],
             },
             "methodology": methodology,
         },
@@ -437,3 +440,72 @@ def test_variable_proposals_price_a_document_data_conflict(
         "pearson_or_spearman",
     ]
     assert "sınıflandırıldı" in conflict["evidence"]
+
+
+def test_human_confirmed_workbook_roles_replace_document_concepts_in_the_brief(
+    client: TestClient, tmp_path: Path
+) -> None:
+    workbook_path = tmp_path / "passive.xlsx"
+    workbook = Workbook()
+    workbook.active.append(["kötüleşme_primer", "öğrenci_bildirimi", "yaş"])
+    workbook.active.append([0, 0, 38])
+    workbook.active.append([1, 1, 72])
+    workbook.save(workbook_path)
+    response = client.post(
+        "/v1/projects",
+        json={
+            "source_path": str(workbook_path),
+            "project_root": str(tmp_path / "passive.biostat"),
+            "brief": {
+                "title": "Passive surveillance",
+                "question": "Is student notification associated with deterioration?",
+                "hypothesis": "Student notification is associated with deterioration.",
+                "design": "cohort",
+                "outcome_variables": ["clinical deterioration"],
+                "exposure_variables": ["student notification"],
+                "covariates": ["age"],
+            },
+        },
+        headers=headers(),
+    )
+    project_id = response.json()["id"]
+
+    approval = client.post(
+        f"/v1/projects/{project_id}/data-approval",
+        json={
+            "roles": [
+                {"name": "kötüleşme_primer", "role": "outcome", "kind": "binary", "confirmed": True},
+                {"name": "öğrenci_bildirimi", "role": "exposure", "kind": "binary", "confirmed": True},
+                {"name": "yaş", "role": "covariate", "kind": "continuous", "confirmed": True},
+            ]
+        },
+        headers=headers(),
+    )
+
+    assert approval.status_code == 200
+    context = client.app.state.projects[UUID(project_id)]
+    assert context.brief.outcome_variables == ["kötüleşme_primer"]
+    assert context.brief.exposure_variables == ["öğrenci_bildirimi"]
+    assert context.brief.covariates == ["yaş"]
+    manifest = (tmp_path / "passive.biostat" / "project.json").read_text(encoding="utf-8")
+    assert "clinical deterioration" not in manifest
+    assert "kötüleşme_primer" in manifest
+
+
+def test_data_approval_requires_at_least_one_human_confirmed_outcome(
+    client: TestClient, tmp_path: Path
+) -> None:
+    project_id = _create_project(client, tmp_path)
+    response = client.post(
+        f"/v1/projects/{project_id}/data-approval",
+        json={
+            "roles": [
+                {"name": "group", "role": "exposure", "kind": "binary", "confirmed": True},
+                {"name": "outcome", "role": "none", "kind": "binary", "confirmed": True},
+            ]
+        },
+        headers=headers(),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "outcome_role_required"

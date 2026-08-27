@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { DataIntake } from "./DataIntake";
-import type { AnalysisApi } from "../../api/client";
+import { AnalysisApiError, type AnalysisApi } from "../../api/client";
 
 afterEach(cleanup);
 
@@ -210,4 +210,75 @@ it("shows a safe approval failure without exposing service details", async () =>
   await user.click(await screen.findByRole("button", { name: "Approve data structure" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Data structure approval could not be completed");
   expect(screen.queryByText("/private/patient-001.xlsx")).not.toBeInTheDocument();
+});
+
+it("distinguishes an unreadable workbook from a picker failure", async () => {
+  const user = userEvent.setup();
+  render(<DataIntake
+    api={{
+      selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+      profileData: vi.fn().mockRejectedValue(new AnalysisApiError("data_profile_failed", "safe")),
+      approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+    }}
+    dataFile={null} approved={false} language="tr" onFile={vi.fn()} onApproval={vi.fn()}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Excel içe aktar" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/Excel dosyası okunamadı/i);
+  expect(alert).not.toHaveTextContent(/seçici açılamadı/i);
+});
+
+it("identifies an incomplete study brief instead of blaming the Excel picker", async () => {
+  const user = userEvent.setup();
+  render(<DataIntake
+    api={{
+      selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+      profileData: vi.fn().mockResolvedValue(profile),
+      prepareDataStructure: vi.fn().mockRejectedValue(new AnalysisApiError("validation_error", "safe")),
+      approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+    }}
+    dataFile={null} approved={false} language="tr"
+    brief={{ title: "", question: "", hypothesis: "", design: "cohort", outcome_variables: [] }}
+    onFile={vi.fn()} onApproval={vi.fn()}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Excel içe aktar" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent(/çalışma özetindeki zorunlu alanları/i);
+  expect(alert).not.toHaveTextContent(/seçici açılamadı/i);
+});
+
+it("shows local-AI variable evidence and keeps uncalibrated suggestions unconfirmed", async () => {
+  const user = userEvent.setup();
+  const onApproval = vi.fn();
+  const localProposal = {
+    value: "outcome", confidence: 0.79,
+    evidence: "The primary outcome was clinical deterioration.",
+    evidence_offset: 10, source: "local:qwen2.5:14b",
+  };
+  render(<DataIntake
+    api={{
+      selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+      profileData: vi.fn().mockResolvedValue(profile),
+      prepareDataStructure: vi.fn().mockResolvedValue({
+        proposals: [{ column: "outcome", role: localProposal, kind: null }],
+        conflicts: [],
+        engine: { requested: "local:qwen2.5:14b", used: "local:qwen2.5:14b", fallback_reason: null },
+      }),
+      approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+    }}
+    dataFile={null} approved={false} language="en"
+    brief={{ title: "Study", question: "Is notification associated?", hypothesis: "It is associated.", design: "cohort", outcome_variables: ["clinical deterioration"] }}
+    onFile={vi.fn()} onApproval={onApproval}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Import Excel" }));
+
+  expect(await screen.findByText("The primary outcome was clinical deterioration.")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Accept remaining clear variables" }));
+  expect(screen.getByRole("button", { name: "Approve data structure" })).toBeDisabled();
+  expect(onApproval).not.toHaveBeenCalled();
 });
