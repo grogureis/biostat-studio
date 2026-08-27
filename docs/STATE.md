@@ -3,6 +3,37 @@
 **Son güncelleme:** 2026-08-27 · Codex App
 **Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio` (Plan 3 fast-forward birleştirildi)
 
+### Gerçek Excel GUI alımı düzeltildi — 2026-08-27
+
+Kullanıcının gönderdiği ekran görüntüsü ve gerçek
+`PassiveSurveillance.xlsx` ile paketli uygulama yeniden üretildi. Excel ve profil
+motoru sağlamdı: `Analiz_Verisi` sayfası 500 satır ve 54 sütun olarak 0,2
+saniyenin altında okunuyordu. Asıl hata, profil sonrası zorunlu proje konumu
+seçiminin başlıksız ikinci bir “Open/Aç” penceresi gibi görünmesiydi. Bu
+pencere açıkken ana ekranda yalnızca dosya adı kaldığı için Excel'in
+işlenmediği izlenimi oluşuyordu.
+
+Proje oluşturma artık açık adlı, iki dilli bir kaydetme penceresidir; varsayılan
+ad `BioStat Project.biostat` olur ve kullanıcı projeyi nereye kaydedeceğini anlar.
+Profil sonucu ve ilerleme durumu bu pencere açılmadan önce ekrana boyanır. Yerel
+LLM eşleştirmesi tamamlanana kadar kabul düğmeleri kapalı kalır; hiçbir rol
+insan incelemesi olmadan `confirmed=true` yapılmaz.
+
+Taze kapılar: Python **349 geçti + 1 ortam koşullu skip**, desktop **85/85**,
+TypeScript typecheck, Vite üretim derlemesi ve `git diff --check` temiz. Yeni DMG
+içindeki uygulama doğrudan bağlı disk kalıbından açıldı; gerçek Excel ile
+500 gözlem ve 54 değişken gösterildi. `kötüleşme_primer` sonuç,
+`öğrenci_bildirimi` maruziyet; `news2_ilk`, `yaş`, `cinsiyet` kovaryat olarak
+geldi ve insan kabul düğmesi etkinleşti. Nihai veri yapısı onayı veya analiz
+bilinçli olarak otomatik çalıştırılmadı.
+
+Teslim: `release/BioStat Studio-0.1.0-arm64.dmg` (198.463.757 bayt), SHA-256
+`ffd2bb98864a391b1f1eea58ea3a4c3dd257d7678009e70fb737102d03c1b61c`.
+Paketli renderer/preload, gömülü servis öz testi, katı ad-hoc imza ve
+`hdiutil verify` kapıları geçti. Kalan operatör kapısı, önerilen yapıyı
+onaylayıp hedef analizi çalıştırmak ve iki dilli raporları bilimsel olarak
+incelemektir.
+
 ### Plan 3 yerel LLM entegrasyonu tamamlandı — 2026-08-27
 
 Kurulu Ollama `qwen2.5:14b` modeli artık metodoloji alımının birincil çıkarım
@@ -27,15 +58,16 @@ Birincil sonuç `kötüleşme_primer`, maruziyet `öğrenci_bildirimi`, kovaryat
 `news2_ilk`, `yaş`, `cinsiyet` olarak önerildi. Firth lojistik regresyon, Little MCAR
 testi ve multiple imputation mevcut sürümde destekleniyormuş gibi sunulmadı.
 
-Taze kapılar: Python **349 geçti + 1 ortam koşullu skip**, desktop **82/82**,
+Taze kapılar (ilk Plan 3 teslimi): Python **349 geçti + 1 ortam koşullu skip**, desktop **82/82**,
 TypeScript typecheck, Vite üretim derlemesi ve `git diff --check` temiz. Yeni arm64
 DMG; paketli renderer/preload, gömülü servis öz testi, katı ad-hoc imza,
 `hdiutil verify` ve paketli yerel-LLM gerçek dosya kabulünden geçti. Teslim:
 `release/BioStat Studio-0.1.0-arm64.dmg` (189 MB), SHA-256
 `09b246d6111ac5a1dafba7af3e9b8c63c719ed83ec05a132229ea5e83abdacf9`.
 DMG 9 GB modeli içermez; Ollama ve `qwen2.5:14b` bu Mac'te kurulu/açık olmalıdır.
-Kalan ürün kapısı paketli grafik arayüzde insanın önerileri görsel olarak
-onaylaması ve iki dilli raporları operatör olarak incelemesidir.
+Bu ilk teslimde paketli grafik arayüz kabulü açıktı; yukarıdaki 2026-08-27
+Excel GUI düzeltmesiyle bu kapı kapatıldı. Analiz ve iki dilli raporların
+operatör incelemesi ayrı kapı olarak sürer.
 
 ### Metodoloji akışı ana geliştirme dalına alındı — 2026-08-27
 

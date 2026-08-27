@@ -15,6 +15,41 @@ const profile = { rows: 12, columns: 2, missing_cells: 1, sheets: ["Sheet1"], se
   outcome: { display_name: "Outcome", kind: "continuous", non_missing: 11, missing: 1, unique_values: 11 },
 }, warnings: [{ code: "missing_values", column: "outcome", message: "Missing values require review." }] };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
+it("shows the parsed workbook and explains the project-save step before matching finishes", async () => {
+  const user = userEvent.setup();
+  const preparation = deferred<{ proposals: []; conflicts: [] }>();
+  render(<DataIntake
+    api={{
+      selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+      profileData: vi.fn().mockResolvedValue(profile),
+      prepareDataStructure: vi.fn().mockReturnValue(preparation.promise),
+      approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(),
+      cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+    }}
+    dataFile={null}
+    approved={false}
+    language="en"
+    brief={{ title: "Study", question: "Question", hypothesis: "Hypothesis", design: "cohort", outcome_variables: ["outcome"], exposure_variables: ["group"] }}
+    onFile={vi.fn()}
+    onApproval={vi.fn()}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Import Excel" }));
+
+  expect(await screen.findByText("12 observations")).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent(/choose where to save the local BioStat project/i);
+  expect(screen.getByRole("button", { name: "Importing Excel…" })).toBeDisabled();
+
+  preparation.resolve({ proposals: [], conflicts: [] });
+  expect(await screen.findByRole("button", { name: "Import Excel" })).toBeEnabled();
+});
+
 it("shows only the structural observation count returned by the local profiler", async () => {
   const user = userEvent.setup();
   render(<DataIntake

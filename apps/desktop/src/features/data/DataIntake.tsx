@@ -20,6 +20,7 @@ const labels = {
     title: "Data & variables",
     intro: "Import an immutable Excel workbook, then review variable roles and coding before planning.",
     import: "Import Excel",
+    importing: "Importing Excel…",
     noFile: "No workbook selected",
     selected: "Selected workbook",
     approve: "Approve data structure",
@@ -31,6 +32,8 @@ const labels = {
     profileFailure: "The Excel workbook could not be read. Check that it is a valid XLSX file and try again.",
     briefFailure: "Complete the required study-brief fields before importing Excel.",
     matchingFailure: "The workbook was read, but the project and variable suggestions could not be prepared. Review the study brief and try again.",
+    profilingStatus: "Reading the Excel structure on this Mac…",
+    projectStatus: "Excel is ready. Choose where to save the local BioStat project in the window that opens; then the local AI will match the methodology to the variables.",
     acceptRemaining: "Accept remaining clear variables",
     conflict: "Conflict for",
     conflictTitle: "Document and data disagree",
@@ -52,6 +55,7 @@ const labels = {
     title: "Veri ve değişkenler",
     intro: "Değiştirilemez bir Excel çalışma kitabı içe aktarın; planlamadan önce değişken rollerini ve kodlamayı inceleyin.",
     import: "Excel içe aktar",
+    importing: "Excel içe aktarılıyor…",
     noFile: "Çalışma kitabı seçilmedi",
     selected: "Seçilen çalışma kitabı",
     approve: "Veri yapısını onayla",
@@ -63,6 +67,8 @@ const labels = {
     profileFailure: "Excel dosyası okunamadı. Geçerli bir XLSX dosyası olduğunu denetleyip yeniden deneyin.",
     briefFailure: "Excel'i içe aktarmadan önce çalışma özetindeki zorunlu alanları tamamlayın.",
     matchingFailure: "Excel okundu; ancak proje ve değişken önerileri hazırlanamadı. Çalışma özetini gözden geçirip yeniden deneyin.",
+    profilingStatus: "Excel yapısı bu Mac üzerinde okunuyor…",
+    projectStatus: "Excel hazır. Açılan pencerede yerel BioStat projesinin kaydedileceği yeri seçin; ardından yerel yapay zekâ metodolojiyi değişkenlerle eşleştirecek.",
     acceptRemaining: "Kalan uygun değişkenleri kabul et",
     conflict: "Çelişki",
     conflictTitle: "Doküman ve veri uyuşmuyor",
@@ -90,6 +96,38 @@ function basename(path: string): string {
 const LOW_CONFIDENCE = 0.8;
 
 const EMPTY_PROPOSALS: VariableProposalResponse = { proposals: [], conflicts: [] };
+
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => resolve());
+    else setTimeout(resolve, 0);
+  });
+}
+
+function rolesForProfile(
+  profile: DataProfile,
+  brief: StudyBrief | undefined,
+  proposals: VariableProposalResponse,
+): Record<string, VariableRole> {
+  return Object.fromEntries(Object.entries(profile.variables).map(([name, variable]) => {
+    let role = "none";
+    if (brief?.outcome_variables.includes(name)) role = "outcome";
+    else if (brief?.exposure_variables?.includes(name)) role = "exposure";
+    else if (brief?.covariates?.includes(name)) role = "covariate";
+    else if (brief?.pair_id_variable === name) role = "pair_id";
+    const inferred = variable.kind === "identifier-candidate" ? "identifier" : variable.kind;
+    const kind = ["continuous", "binary", "categorical", "date", "identifier"].includes(inferred) ? inferred : "exclude";
+    const proposal = proposals.proposals.find((item) => item.column === name);
+    const proposedRole = proposal?.role?.value;
+    const proposedKind = proposal?.kind?.value;
+    return [name, {
+      name,
+      role: proposedRole && proposedRole in labels.en.roles ? proposedRole : role,
+      kind: proposedKind && proposedKind in labels.en.kinds ? proposedKind : kind,
+      confirmed: false,
+    }];
+  }));
+}
 
 function proposalConfidence(proposal: RoleProposalDto | undefined): number {
   return Math.min(proposal?.role?.confidence ?? 1, proposal?.kind?.confidence ?? 1);
@@ -152,54 +190,63 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
   const [approving, setApproving] = useState(false);
   const [approvalFailed, setApprovalFailed] = useState(false);
   const [proposalData, setProposalData] = useState<VariableProposalResponse>(EMPTY_PROPOSALS);
+  const [importStage, setImportStage] = useState<"profiling" | "project" | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [preparationReady, setPreparationReady] = useState(false);
   const chooseFile = async () => {
+    if (importing) return;
+    setImporting(true);
     let path: string | null;
     try {
       path = await api.selectDataFile();
     } catch {
       setImportFailure("picker");
+      setImporting(false);
       return;
     }
     setImportFailure(null);
     onFile(path);
-    if (!path) return;
+    if (!path) {
+      setImporting(false);
+      return;
+    }
+    setProfile(null);
+    setRoles({});
+    setProposalData(EMPTY_PROPOSALS);
+    setPreparationReady(false);
+    setImportStage("profiling");
     let nextProfile: DataProfile;
     try {
       if (!api.profileData) throw new Error("profile_unavailable");
       nextProfile = await api.profileData();
     } catch {
       setImportFailure("profile");
+      setImportStage(null);
+      setImporting(false);
       return;
     }
     setProfile(nextProfile);
+    setRoles(rolesForProfile(nextProfile, brief, EMPTY_PROPOSALS));
     let nextProposals = EMPTY_PROPOSALS;
     if (brief && api.prepareDataStructure) {
       try {
+        setImportStage("project");
+        // Paint the parsed workbook and guidance before Electron opens the
+        // native project-save dialog over the application window.
+        await waitForPaint();
         nextProposals = await api.prepareDataStructure({ ...brief, language }, methodology ?? null);
       } catch (error) {
         setImportFailure(error instanceof AnalysisApiError && error.code === "validation_error" ? "brief" : "matching");
+        setImportStage(null);
+        setImporting(false);
         return;
       }
     }
     setProposalData(nextProposals);
-    setRoles(Object.fromEntries(Object.entries(nextProfile.variables).map(([name, variable]) => {
-      let role = "none";
-      if (brief?.outcome_variables.includes(name)) role = "outcome";
-      else if (brief?.exposure_variables?.includes(name)) role = "exposure";
-      else if (brief?.covariates?.includes(name)) role = "covariate";
-      else if (brief?.pair_id_variable === name) role = "pair_id";
-      const inferred = variable.kind === "identifier-candidate" ? "identifier" : variable.kind;
-      const kind = ["continuous", "binary", "categorical", "date", "identifier"].includes(inferred) ? inferred : "exclude";
-      const proposal = nextProposals.proposals.find((item) => item.column === name);
-      const proposedRole = proposal?.role?.value;
-      const proposedKind = proposal?.kind?.value;
-      return [name, {
-        name,
-        role: proposedRole && proposedRole in labels.en.roles ? proposedRole : role,
-        kind: proposedKind && proposedKind in labels.en.kinds ? proposedKind : kind,
-        confirmed: false,
-      }];
-    })));
+    setRoles(rolesForProfile(nextProfile, brief, nextProposals));
+    setPreparationReady(true);
+    setImportStage(null);
+    setImporting(false);
   };
   const acceptRemaining = () => {
     const conflicts = new Set(proposalData.conflicts.map((conflict) => conflict.column));
@@ -224,7 +271,7 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
   };
 
   return (
-    <section className="task-card" aria-labelledby="data-title">
+    <section className="task-card" aria-labelledby="data-title" aria-busy={importing}>
       <header className="task-heading">
         <p className="eyebrow">{copy.eyebrow}</p>
         <h1 id="data-title">{copy.title}</h1>
@@ -238,11 +285,12 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
           {profile !== null ? <p className="form-help">{profile.rows} {copy.observations}</p> : null}
           <p className="form-help">{copy.privacy}</p>
         </div>
-        <button type="button" className="primary-action" onClick={chooseFile}>{copy.import}</button>
+        <button type="button" className="primary-action" disabled={importing} onClick={chooseFile}>{importing ? copy.importing : copy.import}</button>
       </div>
+      {importStage ? <p className="import-status" role="status" aria-live="polite">{importStage === "profiling" ? copy.profilingStatus : copy.projectStatus}</p> : null}
       {profile ? <section className="variable-profile" aria-labelledby="variable-profile-title">
         <h2 id="variable-profile-title">{copy.variables}</h2>
-        {Object.values(roles).some((role) => !role.confirmed) ? <button type="button" className="secondary-action" onClick={acceptRemaining}>{copy.acceptRemaining}</button> : null}
+        {preparationReady && Object.values(roles).some((role) => !role.confirmed) ? <button type="button" className="secondary-action" onClick={acceptRemaining}>{copy.acceptRemaining}</button> : null}
         {proposalData.conflicts.map((conflict) => <ConflictChoice
           key={conflict.column}
           conflict={conflict}
@@ -256,8 +304,8 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
           return <article key={name} className="variable-row">
             <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} {copy.unique}</p>
             {evidence ? <p className="form-help evidence-quote"><strong>{copy.evidence}:</strong> {evidence}</p> : null}
-            <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-            <label>{copy.kind} {variable.display_name}<select aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}>{Object.entries(copy.kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label>{copy.role} {variable.display_name}<select disabled={!preparationReady} aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label>{copy.kind} {variable.display_name}<select disabled={!preparationReady} aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}>{Object.entries(copy.kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </article>;
         })}
         {profile.warnings.length ? <div className="warning-line"><strong>{copy.warnings}</strong><ul>{profile.warnings.map((warning) => <li key={`${warning.code}:${warning.column ?? "all"}`}>{warning.message}</li>)}</ul></div> : null}
@@ -269,7 +317,7 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
         <button
           type="button"
           className="secondary-action"
-          disabled={!profile || Object.keys(roles).length !== Object.keys(profile.variables).length || Object.values(roles).some((role) => !role.confirmed) || approved || approving}
+          disabled={!profile || !preparationReady || Object.keys(roles).length !== Object.keys(profile.variables).length || Object.values(roles).some((role) => !role.confirmed) || approved || approving}
           onClick={() => void approve()}
         >
           {approved ? copy.approved : approving ? copy.approving : copy.approve}

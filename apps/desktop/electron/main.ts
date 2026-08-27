@@ -8,6 +8,7 @@ import { getSidecarSession, startSidecar, stopSidecar, type SidecarSession } fro
 import { createAuthenticatedApiProxy } from "./api-proxy.js";
 import { createPathCapabilityStore } from "./path-capabilities.js";
 import { assertTrustedIpcSender } from "./ipc-security.js";
+import { projectDialogRequest } from "./project-dialog.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | undefined;
@@ -86,11 +87,19 @@ function registerIpcHandlers(): void {
   ipcMain.handle("biostat:select-project", async (event, mode: unknown) => {
     trusted(event);
     if (mode !== "create" && mode !== "open") throw new Error("Invalid project picker mode");
-    const result = await dialog.showOpenDialog(mainWindow!, {
-      properties: mode === "create" ? ["openDirectory", "createDirectory"] : ["openDirectory"],
-    });
-    const path = result.filePaths[0];
-    return result.canceled || !path
+    const request = projectDialogRequest(mode);
+    let path: string | undefined;
+    let canceled: boolean;
+    if (request.kind === "save") {
+      const result = await dialog.showSaveDialog(mainWindow!, request.options);
+      path = result.filePath;
+      canceled = result.canceled;
+    } else {
+      const result = await dialog.showOpenDialog(mainWindow!, request.options);
+      path = result.filePaths[0];
+      canceled = result.canceled;
+    }
+    return canceled || !path
       ? null
       : pathCapabilities.issue(mode === "create" ? "project-create" : "project-open", path, basename(path));
   });
