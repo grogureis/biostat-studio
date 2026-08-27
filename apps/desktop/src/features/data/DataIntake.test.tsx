@@ -128,6 +128,45 @@ it("bulk-accepts only clear variables and leaves conflicts unconfirmed", async (
   expect(submitted.find((role: { name: string }) => role.name === "outcome")?.confirmed).toBe(true);
 });
 
+it("shows each conflict's evidence and planner cost before the variable list", async () => {
+  const user = userEvent.setup();
+  const api = {
+    selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+    profileData: vi.fn().mockResolvedValue(profile),
+    prepareDataStructure: vi.fn().mockResolvedValue({
+      proposals: [],
+      conflicts: [{
+        column: "group", data_kind: "continuous", document_kind: "categorical",
+        evidence: "Patients were classified by TNM stage I-IV.", evidence_offset: 120,
+        methods_if_document: ["welch_anova"], methods_if_data: ["pearson_or_spearman"],
+        blocked_if_document: [], blocked_if_data: [],
+      }],
+    }),
+    approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+  } as unknown as AnalysisApi;
+
+  render(<DataIntake
+    api={api}
+    dataFile={null}
+    approved={false}
+    language="en"
+    brief={{ title: "Study", question: "Question", hypothesis: "Hypothesis", design: "cohort", outcome_variables: ["outcome"], exposure_variables: ["group"] }}
+    onFile={vi.fn()}
+    onApproval={vi.fn()}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Import Excel" }));
+
+  const conflict = await screen.findByRole("group", { name: "Conflict for Group" });
+  expect(conflict).toHaveTextContent("Patients were classified by TNM stage I-IV.");
+  expect(conflict).toHaveTextContent("Welch ANOVA");
+  expect(conflict).toHaveTextContent("Pearson or Spearman correlation");
+  expect(conflict).not.toHaveTextContent("welch_anova");
+  expect(screen.getByRole("button", { name: "Use document classification for Group" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Use data classification for Group" })).toBeEnabled();
+  expect(conflict.compareDocumentPosition(screen.getByRole("heading", { name: "Group" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
 it("localizes structural metadata and editable role options in Turkish", async () => {
   const user = userEvent.setup();
   render(<DataIntake

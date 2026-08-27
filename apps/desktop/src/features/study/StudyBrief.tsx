@@ -116,11 +116,28 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
   const latest = useRef(value);
   latest.current = value;
   const update = <Key extends keyof StudyBriefDto>(key: Key, next: StudyBriefDto[Key]) => {
+    setFromDocument((current) => {
+      if (!current.has(key)) return current;
+      const changed = new Set(current);
+      changed.delete(key);
+      return changed;
+    });
+    onChange({ ...latest.current, [key]: next });
+  };
+
+  const applyDocumentProposal = <Key extends keyof StudyBriefDto>(key: Key, next: StudyBriefDto[Key], evidence: string | null) => {
+    setFromDocument((current) => {
+      const changed = new Set(current);
+      if (evidence) changed.add(key);
+      else changed.delete(key);
+      return changed;
+    });
     onChange({ ...latest.current, [key]: next });
   };
 
   const [documentName, setDocumentName] = useState<string | null>(null);
   const [extraction, setExtraction] = useState<MethodologyExtraction | null>(null);
+  const [fromDocument, setFromDocument] = useState<Set<keyof StudyBriefDto>>(() => new Set());
   const [failure, setFailure] = useState<KnownErrorCode | null>(null);
   const [busy, setBusy] = useState(false);
   // The file dialog is modal but the extraction that follows it is not, so the
@@ -143,7 +160,7 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
       setExtraction(result);
       onMethodology?.(result);
       if (result.brief.design) {
-        update("design", result.brief.design.value as StudyDesign);
+        applyDocumentProposal("design", result.brief.design.value as StudyDesign, result.brief.design.evidence);
       }
     } catch (error) {
       // Ruling 1: extractMethodology() clears its capability reference before
@@ -230,7 +247,7 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
         <div className="field">
           <label htmlFor="study-design">
             {copy.design}
-            {extraction?.brief.design ? (
+            {fromDocument.has("design") && extraction?.brief.design?.evidence ? (
               <span className="proposal-badge" title={extraction.brief.design.evidence ?? ""}>
                 {copy.proposed}
               </span>
@@ -239,7 +256,7 @@ export function StudyBrief({ value, onChange, onMethodology, language, api }: St
           <select id="study-design" value={value.design} disabled={busy} onChange={(event) => update("design", event.target.value as StudyDesign)}>
             {designs.map((design) => <option key={design.value} value={design.value}>{design[language]}</option>)}
           </select>
-          {extraction?.brief.design?.evidence ? (
+          {fromDocument.has("design") && extraction?.brief.design?.evidence ? (
             <p className="form-help evidence-quote">{extraction.brief.design.evidence}</p>
           ) : null}
         </div>

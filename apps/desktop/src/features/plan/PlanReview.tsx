@@ -1,4 +1,5 @@
 import type { AnalysisPlan } from "../../api/types";
+import { methodLabel } from "./methodLabels";
 
 interface PlanReviewProps {
   language: "en" | "tr";
@@ -54,11 +55,11 @@ export function PlanReview({ language, plan, approved, loading, onApproval, onRu
       {plan?.items.map((item) => (
         <article className="plan-item" key={item.id}>
           <div className="plan-kicker">{item.estimand}</div>
-          <h2>{item.method}</h2>
+          <h2>{methodLabel(item.method, language)}</h2>
           <p>{item.rationale}</p>
           <div className="plan-detail-grid">
             <div><h3>{text.assumptions}</h3><ul>{item.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul></div>
-            {item.robust_alternative ? <div><h3>{text.alternative}</h3><p>{item.robust_alternative}</p><button type="button" className="secondary-action" disabled={loading} onClick={() => onAlternative(item.id, item.robust_alternative as string)}>{text.useAlternative}</button><p className="microcopy">{text.alternativeHelp}</p></div> : null}
+            {item.robust_alternative ? <div><h3>{text.alternative}</h3><p>{methodLabel(item.robust_alternative, language)}</p><button type="button" className="secondary-action" disabled={loading} onClick={() => onAlternative(item.id, item.robust_alternative as string)}>{text.useAlternative}</button><p className="microcopy">{text.alternativeHelp}</p></div> : null}
           </div>
           {item.warnings.map((warning) => <p className="warning-line" key={warning}><span aria-hidden="true">!</span>{warning}</p>)}
         </article>

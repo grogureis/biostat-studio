@@ -1,6 +1,7 @@
 import type { AnalysisApi } from "../../api/client";
-import type { DataProfile, MethodologyExtraction, RoleProposalDto, StudyBrief, VariableProposalResponse, VariableRole } from "../../api/types";
+import type { ConflictDto, DataProfile, MethodologyExtraction, RoleProposalDto, StudyBrief, VariableProposalResponse, VariableRole } from "../../api/types";
 import { useState } from "react";
+import { methodLabel } from "../plan/methodLabels";
 
 interface DataIntakeProps {
   api: AnalysisApi;
@@ -28,6 +29,16 @@ const labels = {
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
     pickerFailure: "The workbook picker could not be opened. Try again.",
     acceptRemaining: "Accept remaining clear variables",
+    conflict: "Conflict for",
+    conflictTitle: "Document and data disagree",
+    dataSays: "Data classification",
+    documentSays: "Document classification",
+    evidence: "Document evidence",
+    analysisChange: "This choice changes the analysis.",
+    useDocument: "Use document classification for",
+    useData: "Use data classification for",
+    methods: "Planned methods",
+    blocked: "This choice blocks analysis",
     observations: "observations",
     missing: "missing", unique: "unique", role: "Role for", kind: "Kind for", variables: "Variable structure", warnings: "Questions to resolve",
     roles: { none: "None", outcome: "Outcome", exposure: "Exposure", covariate: "Covariate", pair_id: "Pair ID", exclude: "Exclude" },
@@ -47,6 +58,16 @@ const labels = {
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
     pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
     acceptRemaining: "Kalan uygun değişkenleri kabul et",
+    conflict: "Çelişki",
+    conflictTitle: "Doküman ve veri uyuşmuyor",
+    dataSays: "Veri sınıflandırması",
+    documentSays: "Doküman sınıflandırması",
+    evidence: "Doküman kanıtı",
+    analysisChange: "Bu seçim analizi değiştirir.",
+    useDocument: "Doküman sınıflandırmasını kullan",
+    useData: "Veri sınıflandırmasını kullan",
+    methods: "Planlanan yöntemler",
+    blocked: "Bu seçim analizi engelliyor",
     observations: "gözlem",
     missing: "eksik", unique: "benzersiz", role: "Rol", kind: "Tür", variables: "Değişken yapısı", warnings: "Çözülmesi gereken sorular",
     roles: { none: "Yok", outcome: "Sonuç", exposure: "Maruziyet", covariate: "Kovaryat", pair_id: "Eşleştirme kimliği", exclude: "Dışla" },
@@ -66,6 +87,55 @@ const EMPTY_PROPOSALS: VariableProposalResponse = { proposals: [], conflicts: []
 
 function proposalConfidence(proposal: RoleProposalDto | undefined): number {
   return Math.min(proposal?.role?.confidence ?? 1, proposal?.kind?.confidence ?? 1);
+}
+
+function ConflictChoice({
+  conflict,
+  displayName,
+  language,
+  onChoose,
+}: {
+  conflict: ConflictDto;
+  displayName: string;
+  language: "en" | "tr";
+  onChoose(kind: string): void;
+}) {
+  const copy = labels[language];
+  const choices = [
+    {
+      key: "document",
+      title: copy.documentSays,
+      kind: conflict.document_kind,
+      methods: conflict.methods_if_document,
+      blocked: conflict.blocked_if_document,
+      action: `${copy.useDocument} ${displayName}`,
+    },
+    {
+      key: "data",
+      title: copy.dataSays,
+      kind: conflict.data_kind,
+      methods: conflict.methods_if_data,
+      blocked: conflict.blocked_if_data,
+      action: `${copy.useData} ${displayName}`,
+    },
+  ];
+
+  return (
+    <article className="plan-item conflict-card" role="group" aria-label={`${copy.conflict} ${displayName}`}>
+      <div className="plan-kicker">{copy.conflictTitle}</div>
+      <h3>{copy.conflict} {displayName}</h3>
+      {conflict.evidence ? <p className="form-help evidence-quote"><strong>{copy.evidence}:</strong> {conflict.evidence}</p> : null}
+      <p className="warning-line"><span aria-hidden="true">!</span>{copy.analysisChange}</p>
+      <div className="plan-detail-grid">
+        {choices.map((choice) => <section key={choice.key}>
+          <h4>{choice.title}: {labels[language].kinds[choice.kind as keyof typeof labels[typeof language]["kinds"]] ?? choice.kind}</h4>
+          {choice.methods.length ? <p><strong>{copy.methods}:</strong> {choice.methods.map((method) => methodLabel(method, language)).join(", ")}</p> : null}
+          {choice.blocked.length ? <p className="warning-line"><strong>{copy.blocked}:</strong> {choice.blocked.join(", ")}</p> : null}
+          <button type="button" className="secondary-action" aria-label={choice.action} onClick={() => onChoose(choice.kind)}>{choice.action}</button>
+        </section>)}
+      </div>
+    </article>
+  );
 }
 
 export function DataIntake({ api, dataFile, approved, language, brief, methodology, onFile, onApproval }: DataIntakeProps) {
@@ -153,6 +223,13 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
       {profile ? <section className="variable-profile" aria-labelledby="variable-profile-title">
         <h2 id="variable-profile-title">{copy.variables}</h2>
         {Object.values(roles).some((role) => !role.confirmed) ? <button type="button" className="secondary-action" onClick={acceptRemaining}>{copy.acceptRemaining}</button> : null}
+        {proposalData.conflicts.map((conflict) => <ConflictChoice
+          key={conflict.column}
+          conflict={conflict}
+          displayName={profile.variables[conflict.column]?.display_name ?? conflict.column}
+          language={language}
+          onChoose={(kind) => setRoles((current) => ({ ...current, [conflict.column]: { ...current[conflict.column], kind, confirmed: true } }))}
+        />)}
         {Object.entries(profile.variables).map(([name, variable]) => <article key={name} className="variable-row">
           <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} {copy.unique}</p>
           <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>

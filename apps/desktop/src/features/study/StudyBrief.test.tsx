@@ -294,6 +294,19 @@ function Harness({ api }: { api: AnalysisApi }) {
   );
 }
 
+it("drops the from-document badge once the user edits the proposed field", async () => {
+  const user = userEvent.setup();
+  render(<Harness api={makeApi()} />);
+
+  await user.click(screen.getByRole("button", { name: /metodoloji dokümanı/i }));
+  expect(await screen.findByText("dokümandan")).toBeInTheDocument();
+
+  await user.selectOptions(screen.getByLabelText(/çalışma tasarımı/i), "trial");
+
+  expect(screen.queryByText("dokümandan")).not.toBeInTheDocument();
+  expect(screen.queryByText("Retrospektif kohort çalışması.")).not.toBeInTheDocument();
+});
+
 it("keeps a brief field that changed while the extraction was still in flight", async () => {
   const user = userEvent.setup();
   const pending = deferred<MethodologyExtraction>();
