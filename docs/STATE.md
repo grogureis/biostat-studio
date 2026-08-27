@@ -1,7 +1,26 @@
 # STATE.md — biostat-studio
 
-**Son güncelleme:** 2026-08-24 · oturum `biostat-studio-app-8c`
-**Dal:** `codex/biostat-studio` · `feat/methodology-intake` **BİRLEŞTİRİLDİ** (`9c9f624`, `--no-ff`)
+**Son güncelleme:** 2026-08-27 · Codex App
+**Aktif geliştirme:** `.worktrees/methodology-intake` · `feat/methodology-matching`
+
+### Plan 2 tamamlandı — 2026-08-27
+
+Metodoloji eşleştirme planının 10/10 görevi tamamlandı. Task 10 commit'i `c6ec726`:
+çelişkili değişkenler listenin üstünde kanıt ve gerçek planner maliyetiyle
+gösteriliyor; metot kimlikleri ortak EN/TR etiket yardımcısından geçiyor; insan
+veri/doküman sınıflandırmasını açıkça seçiyor. Dokümandan gelen tasarım rozeti ve
+kanıtı, kullanıcı alanı düzenlediğinde düşüyor.
+
+RED ölçümü 19/21 geçer ve iki beklenen kırık; GREEN/tam kapı ölçümü Python
+326 geçti + 1 skip, desktop 76/76, typecheck ve diff kontrolü temiz. Final dal taramasında
+yeni Critical/Important bulgu yok. Plan 3'e devredilen iki ölçülmüş sınır açık:
+kalibre edilmemiş/dar kavram-sütun eşleştirme ve Türkçe fiil-sonu kovaryat cümlelerinde
+kural motorunun bilinçli sessizliği. Paketli uygulamada gerçek Excel ile GUI operatör kabul
+testi de ayrı bir ürün kapısı olarak açık.
+
+---
+
+### Önceki birleştirme kaydı — 2026-08-24
 
 ### BİRLEŞTİRME YAPILDI — 2026-08-24, Erdem'in kararı
 22 commit `codex/biostat-studio`'ya girdi. **Push edilmedi.** `origin` hâlâ 2 docs-only commit
