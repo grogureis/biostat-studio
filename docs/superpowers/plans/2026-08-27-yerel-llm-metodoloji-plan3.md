@@ -1,5 +1,7 @@
 # Yerel LLM Metodoloji Çıkarımı Plan 3 Implementation Plan
 
+**Durum:** 2026-08-27'de uygulandı, gerçek Word/Excel ve paketli DMG servisiyle doğrulandı.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Kurulu Ollama `qwen2.5:14b` modelini metodoloji belgesi ve Excel sütun şemasından güvenli, kanıtlı ve insan-onaylı çalışma/değişken önerileri üretmek için BioStat Studio'ya bağlamak.

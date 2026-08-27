@@ -1,7 +1,7 @@
 # STATE.md — biostat-studio
 
 **Son güncelleme:** 2026-08-27 · Codex App
-**Aktif geliştirme:** `.worktrees/methodology-intake` · `codex/local-llm-intake` (yayın birleştirmesi bekliyor)
+**Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio` (Plan 3 fast-forward birleştirildi)
 
 ### Plan 3 yerel LLM entegrasyonu tamamlandı — 2026-08-27
 
