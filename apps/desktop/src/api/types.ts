@@ -142,6 +142,29 @@ export interface ProposalDto {
   source: string;
 }
 
+export interface RoleProposalDto {
+  column: string;
+  role: ProposalDto | null;
+  kind: ProposalDto | null;
+}
+
+export interface ConflictDto {
+  column: string;
+  data_kind: string;
+  document_kind: string;
+  evidence: string | null;
+  evidence_offset: number | null;
+  methods_if_document: string[];
+  methods_if_data: string[];
+  blocked_if_document: string[];
+  blocked_if_data: string[];
+}
+
+export interface VariableProposalResponse {
+  proposals: RoleProposalDto[];
+  conflicts: ConflictDto[];
+}
+
 /** Mirrors BriefProposal in services/analysis/biostat_service/extractors/contracts.py — all eight fields. */
 export interface BriefProposalDto {
   title: ProposalDto | null;

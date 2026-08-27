@@ -1,4 +1,4 @@
-import type { AnalysisPlan, AnalysisResult, DataProfile, Language, MethodologyExtraction, PowerRequest, PowerResponse, StudyBrief, VariableRole } from "./types";
+import type { AnalysisPlan, AnalysisResult, DataProfile, Language, MethodologyExtraction, PowerRequest, PowerResponse, StudyBrief, VariableProposalResponse, VariableRole } from "./types";
 
 export interface AnalysisApi {
   openProject?(): Promise<OpenProjectSnapshot | null>;
@@ -6,6 +6,8 @@ export interface AnalysisApi {
   profileData?(): Promise<DataProfile>;
   selectMethodologyDocument?(): Promise<string | null>;
   extractMethodology?(): Promise<MethodologyExtraction>;
+  /** Creates the durable local project, then returns document-backed suggestions for human review. */
+  prepareDataStructure?(brief: StudyBrief, methodology?: MethodologyExtraction | null): Promise<VariableProposalResponse>;
   approveDataStructure(brief: StudyBrief, roles?: VariableRole[], methodology?: MethodologyExtraction | null): Promise<void>;
   /** Attaches a document to a project that is already open — as opposed to the `methodology` carried into approveDataStructure, which attaches at creation time. */
   attachMethodology?(projectId: string, extraction: MethodologyExtraction): Promise<void>;
@@ -204,7 +206,7 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
         source_capability: capability.id,
       });
     },
-    approveDataStructure: async (brief: StudyBrief, roles: VariableRole[] = [], methodology: MethodologyExtraction | null = null) => {
+    prepareDataStructure: async (brief: StudyBrief, methodology: MethodologyExtraction | null = null) => {
       if (!dataFile) throw safeError();
       const projectDirectory = await bridge.selectProject("create");
       if (!projectDirectory) throw new AnalysisApiError("project_selection_cancelled", "A project folder is required to continue.");
@@ -215,7 +217,22 @@ export function createAnalysisApi(bridge: BiostatWindowBridge): AnalysisApi {
         ...(methodology ? { methodology: methodologyDocument(methodology) } : {}),
       });
       projectId = project.id;
-      await send<{ approved: boolean }>(`/v1/projects/${project.id}/data-approval`, { roles });
+      return send<VariableProposalResponse>(`/v1/projects/${project.id}/variable-proposals`, {});
+    },
+    approveDataStructure: async (brief: StudyBrief, roles: VariableRole[] = [], methodology: MethodologyExtraction | null = null) => {
+      if (!projectId) {
+        if (!dataFile) throw safeError();
+        const projectDirectory = await bridge.selectProject("create");
+        if (!projectDirectory) throw new AnalysisApiError("project_selection_cancelled", "A project folder is required to continue.");
+        const project = await send<{ id: string }>("/v1/projects", {
+          source_capability: dataFile.importCapability,
+          project_capability: projectDirectory.id,
+          brief,
+          ...(methodology ? { methodology: methodologyDocument(methodology) } : {}),
+        });
+        projectId = project.id;
+      }
+      await send<{ approved: boolean }>(`/v1/projects/${requireProject()}/data-approval`, { roles });
     },
     attachMethodology: async (targetProjectId: string, extraction: MethodologyExtraction) => {
       await send<{ attached: boolean }>(`/v1/projects/${targetProjectId}/methodology`, methodologyDocument(extraction));

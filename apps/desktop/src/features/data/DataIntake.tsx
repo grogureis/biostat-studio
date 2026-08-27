@@ -1,5 +1,5 @@
 import type { AnalysisApi } from "../../api/client";
-import type { DataProfile, StudyBrief, VariableRole } from "../../api/types";
+import type { DataProfile, MethodologyExtraction, RoleProposalDto, StudyBrief, VariableProposalResponse, VariableRole } from "../../api/types";
 import { useState } from "react";
 
 interface DataIntakeProps {
@@ -8,6 +8,7 @@ interface DataIntakeProps {
   approved: boolean;
   language: "en" | "tr";
   brief?: StudyBrief;
+  methodology?: MethodologyExtraction | null;
   onFile(path: string | null): void;
   onApproval(roles: VariableRole[]): Promise<void>;
 }
@@ -25,7 +26,8 @@ const labels = {
     approving: "Approving data structure…",
     approvalFailure: "Data structure approval could not be completed. Review the workbook and try again.",
     privacy: "Only the file name is shown here. The original workbook is never overwritten.",
-  pickerFailure: "The workbook picker could not be opened. Try again.",
+    pickerFailure: "The workbook picker could not be opened. Try again.",
+    acceptRemaining: "Accept remaining clear variables",
     observations: "observations",
     missing: "missing", unique: "unique", role: "Role for", kind: "Kind for", variables: "Variable structure", warnings: "Questions to resolve",
     roles: { none: "None", outcome: "Outcome", exposure: "Exposure", covariate: "Covariate", pair_id: "Pair ID", exclude: "Exclude" },
@@ -43,7 +45,8 @@ const labels = {
     approving: "Veri yapısı onaylanıyor…",
     approvalFailure: "Veri yapısı onayı tamamlanamadı. Çalışma kitabını gözden geçirip yeniden deneyin.",
     privacy: "Burada yalnızca dosya adı gösterilir. Orijinal çalışma kitabının üzerine yazılmaz.",
-  pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
+    pickerFailure: "Çalışma kitabı seçici açılamadı. Lütfen yeniden deneyin.",
+    acceptRemaining: "Kalan uygun değişkenleri kabul et",
     observations: "gözlem",
     missing: "eksik", unique: "benzersiz", role: "Rol", kind: "Tür", variables: "Değişken yapısı", warnings: "Çözülmesi gereken sorular",
     roles: { none: "Yok", outcome: "Sonuç", exposure: "Maruziyet", covariate: "Kovaryat", pair_id: "Eşleştirme kimliği", exclude: "Dışla" },
@@ -55,13 +58,24 @@ function basename(path: string): string {
   return path.split(/[\\/]/).at(-1) ?? path;
 }
 
-export function DataIntake({ api, dataFile, approved, language, brief, onFile, onApproval }: DataIntakeProps) {
+// This threshold is intentionally aligned with the uncalibrated matcher threshold.
+// Plan 3's gold set must calibrate both values together.
+const LOW_CONFIDENCE = 0.8;
+
+const EMPTY_PROPOSALS: VariableProposalResponse = { proposals: [], conflicts: [] };
+
+function proposalConfidence(proposal: RoleProposalDto | undefined): number {
+  return Math.min(proposal?.role?.confidence ?? 1, proposal?.kind?.confidence ?? 1);
+}
+
+export function DataIntake({ api, dataFile, approved, language, brief, methodology, onFile, onApproval }: DataIntakeProps) {
   const copy = labels[language];
   const [pickerFailed, setPickerFailed] = useState(false);
   const [profile, setProfile] = useState<DataProfile | null>(null);
   const [roles, setRoles] = useState<Record<string, VariableRole>>({});
   const [approving, setApproving] = useState(false);
   const [approvalFailed, setApprovalFailed] = useState(false);
+  const [proposalData, setProposalData] = useState<VariableProposalResponse>(EMPTY_PROPOSALS);
   const chooseFile = async () => {
     try {
       const path = await api.selectDataFile();
@@ -70,6 +84,10 @@ export function DataIntake({ api, dataFile, approved, language, brief, onFile, o
       const nextProfile = path && api.profileData ? await api.profileData() : null;
       setProfile(nextProfile);
       if (nextProfile) {
+        const nextProposals = brief && api.prepareDataStructure
+          ? await api.prepareDataStructure({ ...brief, language }, methodology ?? null)
+          : EMPTY_PROPOSALS;
+        setProposalData(nextProposals);
         setRoles(Object.fromEntries(Object.entries(nextProfile.variables).map(([name, variable]) => {
           let role = "none";
           if (brief?.outcome_variables.includes(name)) role = "outcome";
@@ -78,12 +96,30 @@ export function DataIntake({ api, dataFile, approved, language, brief, onFile, o
           else if (brief?.pair_id_variable === name) role = "pair_id";
           const inferred = variable.kind === "identifier-candidate" ? "identifier" : variable.kind;
           const kind = ["continuous", "binary", "categorical", "date", "identifier"].includes(inferred) ? inferred : "exclude";
-          return [name, { name, role, kind, confirmed: true }];
+          const proposal = nextProposals.proposals.find((item) => item.column === name);
+          const proposedRole = proposal?.role?.value;
+          const proposedKind = proposal?.kind?.value;
+          return [name, {
+            name,
+            role: proposedRole && proposedRole in labels.en.roles ? proposedRole : role,
+            kind: proposedKind && proposedKind in labels.en.kinds ? proposedKind : kind,
+            confirmed: false,
+          }];
         })));
       }
     } catch {
       setPickerFailed(true);
     }
+  };
+  const acceptRemaining = () => {
+    const conflicts = new Set(proposalData.conflicts.map((conflict) => conflict.column));
+    const proposals = new Map(proposalData.proposals.map((proposal) => [proposal.column, proposal]));
+    setRoles((current) => Object.fromEntries(Object.entries(current).map(([name, role]) => [
+      name,
+      !conflicts.has(name) && proposalConfidence(proposals.get(name)) >= LOW_CONFIDENCE
+        ? { ...role, confirmed: true }
+        : role,
+    ])));
   };
   const approve = async () => {
     setApproving(true);
@@ -116,6 +152,7 @@ export function DataIntake({ api, dataFile, approved, language, brief, onFile, o
       </div>
       {profile ? <section className="variable-profile" aria-labelledby="variable-profile-title">
         <h2 id="variable-profile-title">{copy.variables}</h2>
+        {Object.values(roles).some((role) => !role.confirmed) ? <button type="button" className="secondary-action" onClick={acceptRemaining}>{copy.acceptRemaining}</button> : null}
         {Object.entries(profile.variables).map(([name, variable]) => <article key={name} className="variable-row">
           <h3>{variable.display_name}</h3><p>{variable.non_missing} · {variable.missing} {copy.missing} · {variable.unique_values} {copy.unique}</p>
           <label>{copy.role} {variable.display_name}<select aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -130,7 +167,7 @@ export function DataIntake({ api, dataFile, approved, language, brief, onFile, o
         <button
           type="button"
           className="secondary-action"
-          disabled={!profile || Object.keys(roles).length !== Object.keys(profile.variables).length || approved || approving}
+          disabled={!profile || Object.keys(roles).length !== Object.keys(profile.variables).length || Object.values(roles).some((role) => !role.confirmed) || approved || approving}
           onClick={() => void approve()}
         >
           {approved ? copy.approved : approving ? copy.approving : copy.approve}
