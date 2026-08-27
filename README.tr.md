@@ -4,7 +4,7 @@
 
 BioStat Studio; araştırma sorusunu, isteğe bağlı metodoloji belgesini, Excel veri kümesini ve insan tarafından açıkça onaylanmış çalışma bilgilerini yeniden üretilebilir bir istatistiksel analize ve yayına hazır Word Bulgular bölümüne dönüştüren, Apple Silicon macOS için çevrimdışı öncelikli bir uygulamadır.
 
-Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmiş bir iş akışı isteyen biyomedikal araştırmacılar için tasarlanmıştır. Uygulama Codex'ten bağımsız çalışır ve kurulumdan sonra ayrıca Python yüklenmesini gerektirmez.
+Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmiş bir iş akışı isteyen biyomedikal araştırmacılar için tasarlanmıştır. Uygulama Codex'ten bağımsız çalışır ve kurulumdan sonra ayrıca Python yüklenmesini gerektirmez. Metodoloji yapay zekâsı için Ollama ve yerel `qwen2.5:14b` modeli gerekir; model kapalıysa uygulama çökmez, daha sınırlı kural motoruna geri döner.
 
 > **Proje durumu:** doğrulanmış yayın öncesi dikey kesit. Otomatik bilimsel, güvenlik, masaüstü, paketleme ve iki dilli rapor kapıları geçmektedir. Klinik veya üretim kullanımından önce gerçek veriyle operatör kabul testi gereklidir.
 
@@ -12,7 +12,7 @@ Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmi�
 
 BioStat Studio araştırmacıyı altı açık aşamadan geçirir:
 
-1. **Çalışma özeti** — araştırma sorusu, hipotez, tasarım, sonuçlar, maruziyetler, kovaryatlar ve dili kaydeder. Word, PDF, TXT veya Markdown metodoloji belgesi kaynak kanıtıyla çalışma tasarımı önerebilir; öneri düzenlenebilir ve onaysız kalır.
+1. **Çalışma özeti** — araştırma sorusu, hipotez, tasarım, sonuçlar, maruziyetler, kovaryatlar ve dili kaydeder. Yerel `qwen2.5:14b`, Word, PDF, TXT veya Markdown metodoloji belgesinden bu alanları kanıtlarıyla önerir; her alan düzenlenebilir ve onaysız kalır.
 2. **Veri ve değişkenler** — `.xlsx` çalışma kitabını içe aktarır, yapısal profili inceler, metodoloji kavramlarını veri sütunlarıyla uzlaştırır ve değişken rolleriyle analitik türleri açıkça onaylatır. Çelişkiler, belge kanıtı ve analiz planına gerçek etkileriyle değişken listesinin üzerinde gösterilir.
 3. **Analiz planı** — tahmin hedefini, seçilen yöntemi, varsayımları, uyarıları, planlanan çıktıları ve belgelenmiş alternatifleri gösterir.
 4. **Çalıştır ve tanıla** — yalnızca onaylanan değişmez planı yürütür, ilerlemeyi gösterir ve gerektiğinde güvenle iptal eder.
@@ -40,7 +40,7 @@ Mevcut sürüm şu analizleri yürütür:
 
 Sıra temelli yöntemler asla sessizce seçilmez: plan bunları alternatif olarak belgeler ve birine geçiş, yeni bir açık onay için planı yeniden oluşturur. İçe aktarılmış veriye dokunmayan belirlenimci önsel **güç ve örneklem büyüklüğü hesaplayıcısı** (iki örneklem ve eşleştirilmiş t testleri, tek yönlü ANOVA, iki oran, korelasyon) kullanılabilir. CSV/SAV aktarımı, sağkalım analizi, karma modeller, meta-analiz, nedensel çıkarım ve makine öğrenmesi yol haritasındadır.
 
-Metodoloji eşleştirmesi bilinçli olarak muhafazakârdır ve kalibre edilmiş bir tahmin modeli değildir. Kanıt belirsiz olduğunda, bazı Türkçe fiil-sonu kovaryat ifadeleri dahil, sessiz kalabilir. Sınıflandırmaları yalnızca öneridir: araştırmacı inceleyip açıkça kabul etmeden veya düzenlemeden uygulama `confirmed=true` yazmaz.
+Metodoloji eşleştirmesi yerel Ollama `qwen2.5:14b` modelini birincil, belirlenimci kural motorunu güvenli geri dönüş olarak kullanır. Model birincil analiz cümlesinden soru, hipotez, sonuç, maruziyet ve kovaryatları çıkarır; sonra bunları Excel'in gerçek sütun adlarıyla eşleştirir. Bu sınıflandırmalar kalibre edilmiş bir tahmin modeli değildir. Gold-set kalibrasyonu tamamlanana kadar LLM güveni en fazla `0.79`'dur; toplu kabul eşiği `0.80` olduğu için araştırmacı inceleyip açıkça kabul etmeden veya düzenlemeden uygulama `confirmed=true` yazmaz.
 
 ## Mimari
 
@@ -65,7 +65,7 @@ Electron; paketlenmiş arm64 Python 3.12/FastAPI yan hizmetini `127.0.0.1` üzer
 
 Python servisi bağımsız test edilebilen modüllere ayrılır:
 
-- `methodology_intake` ve `extractors` — DOCX, PDF, TXT veya Markdown'dan sınırlı yerel metin çıkarımı, kanıt seçimi ve çalışma tasarımı önerileri;
+- `methodology_intake` ve `extractors` — DOCX, PDF, TXT veya Markdown'dan sınırlı metin çıkarımı, kanıt-bağlı yerel Ollama önerileri ve her hata durumunda kural tabanlı geri dönüş;
 - `data_intake` — Excel okuma, kanonik kolon kimlikleri, yapısal profil ve onaylanan türler;
 - `variable_reconciliation` — muhafazakâr metodoloji-sütun eşleştirmesi, çelişki saptama ve tek kullanımlık onaylı rol kopyalarında planner etkisi fiyatlama;
 - `study_model` ve `planner` — yapılandırılmış araştırma bilgileri ve deterministik, kapalı-hata analiz seçimi;
@@ -81,6 +81,7 @@ Python servisi bağımsız test edilebilen modüllere ayrılır:
 - İçe aktarılan çalışma kitabı değişmez proje kopyasına alınır ve SHA-256 ile parmak izlenir.
 - Özgün metodoloji dosyası projeye kopyalanmaz. Çıkarılmış metin, kaynak adı, biçim ve parmak izi; sonraki çalışma ve değişken incelemelerinde aynı kanıtın kullanılabilmesi için yerel `.biostat` projesinde saklanır.
 - Ham metodoloji yolları renderer'a ulaşmaz; tek kullanımlık dosya yetkileri Electron ana sürecinde tüketilir. Makine önerileri açık insan eylemine kadar onaysız kalır.
+- Ollama yalnızca sabit `127.0.0.1:11434` adresinden çağrılır. Metodoloji metni yerel modele gidebilir; Excel hücreleri ve hasta satırları gitmez. Değişken eşleştirmesinde yalnızca sütun adı, çıkarılan tür, benzersiz değer sayısı ve eksik olmayan hücre sayısı kullanılır.
 - Ham kaynak yolları, hasta satırları ve serbest metin servis hataları kalıcı manifestlerden ve raporlardan dışlanır.
 - Veri yapısı ve analiz planı ayrı ayrı açık onay gerektirir.
 - Veri kümesi, rol kaydı, çalışma özeti veya plan değişirse sonraki onay ve sonuçlar geçersizleşir.
@@ -122,6 +123,7 @@ Gereksinimler:
 - Apple Silicon Mac
 - Node.js/npm
 - Python 3.12 (örneğin `brew install python@3.12`)
+- Yerel yapay zekâ geliştirme ve kabul testleri için Ollama ile `qwen2.5:14b`
 
 Temiz bir klondan:
 
@@ -155,18 +157,21 @@ npm run package:mac
 release/BioStat Studio-0.1.0-arm64.dmg
 ```
 
+DMG Python ve istatistik motorunu içerir, 9 GB'lık dil modelini içermez. Yerel yapay zekâ için Ollama'yı açın ve `qwen2.5:14b` modelinin kurulu olduğundan emin olun. Ollama kapalıyken belge ve Excel içe aktarma devam eder; arayüz kural tabanlı sınırlı geri dönüşü açıkça bildirir.
+
 Apple Developer ID yapılandırılmadığı için mevcut paket ad-hoc imzalıdır ve notarize edilmemiştir. Dosya yayımlanmadan önce paketli renderer/preload kontrolleri, gömülü yan hizmet öz testi, katı kod imzası doğrulaması ve DMG sağlama toplamı doğrulaması çalışır. Paket başka bir Mac'e kopyalandığında yine de macOS Gatekeeper uyarısı beklenir. Genel dağıtımdan önce Developer ID imzası, hardened runtime ve notarization gerekir.
 
 ## Mevcut doğrulama
 
-- Python bilimsel/servis paketi: **327 geçti, 1 ortam koşullu atlandı**
-- Masaüstü paketi: **76 geçti**
+- Python bilimsel/servis paketi: **349 geçti, 1 ortam koşullu atlandı**
+- Masaüstü paketi: **82 geçti**
 - TypeScript tür denetimi ve üretim derlemesi: geçti
 - Paketli arm64 renderer/preload, gömülü yan hizmet, katı ad-hoc imza ve DMG sağlama toplamı kapıları: geçti
+- Gerçek `Methods_Section.docx` + 500×54 `PassiveSurveillance.xlsx`: kaynak ve DMG içindeki paketli serviste yerel `qwen2.5:14b` ile doğru birincil sonuç/maruziyet/kovaryat eşleştirmesi geçti
 - İngilizce/Türkçe DOCX sayısal eşdeğerliği ve görsel render incelemesi: geçti
 - İngilizce/Türkçe DOCX erişilebilirlik denetimi: 0 yüksek, 0 orta, 0 düşük bulgu
 
-Kalan kabul kapısı, paketli uygulamada gerçek bir araştırma Excel'iyle uçtan uca çalıştırma ve iki dilde raporların operatör tarafından incelenmesidir.
+Kalan kabul kapısı, paketli grafik arayüzde insanın önerileri görsel olarak inceleyip onaylaması ve iki dilde raporları operatör olarak değerlendirmesidir.
 
 ## Yol haritası
 

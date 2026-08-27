@@ -4,7 +4,7 @@
 
 BioStat Studio is an offline-first Apple Silicon macOS application that turns a research question, an optional methodology document, an Excel dataset, and explicitly human-confirmed study metadata into a reproducible statistical analysis and a publication-ready Word Results section.
 
-It is designed for biomedical researchers who want a guided workflow without sending patient or research data to a cloud service. The application runs independently of Codex and does not require Python after installation.
+It is designed for biomedical researchers who want a guided workflow without sending patient or research data to a cloud service. The application runs independently of Codex and does not require Python after installation. Methodology AI requires Ollama and the local `qwen2.5:14b` model; when the model is unavailable, the application stays usable and falls back to its narrower rule engine.
 
 > **Project status:** verified pre-release vertical slice. The automated scientific, security, desktop, packaging, and bilingual report gates pass. A real-dataset operator acceptance run is still required before any clinical or production use.
 
@@ -12,7 +12,7 @@ It is designed for biomedical researchers who want a guided workflow without sen
 
 BioStat Studio guides the researcher through six explicit stages:
 
-1. **Study brief** — record the research question, hypothesis, design, outcomes, exposures, covariates, and language. A Word, PDF, TXT, or Markdown methodology document can propose the study design with its source evidence; the proposal remains editable and unconfirmed.
+1. **Study brief** — record the research question, hypothesis, design, outcomes, exposures, covariates, and language. Local `qwen2.5:14b` proposes these fields from a Word, PDF, TXT, or Markdown methodology document with source evidence; every field remains editable and unconfirmed.
 2. **Data and variables** — import an `.xlsx` workbook, inspect its structural profile, reconcile methodology concepts with dataset columns, and explicitly confirm variable roles and analytical kinds. Conflicts are surfaced above the variable list with document evidence and their real effect on the analysis plan.
 3. **Analysis plan** — review the estimand, selected method, assumptions, warnings, planned outputs, and documented alternatives.
 4. **Run and diagnose** — execute only the approved immutable plan, monitor progress, and cancel safely when needed.
@@ -40,7 +40,7 @@ The current release executes:
 
 Rank-based methods are never selected silently: the plan documents them as alternatives, and switching to one regenerates the plan for a new explicit approval. A deterministic a-priori **power and sample-size calculator** (two-sample and paired t tests, one-way ANOVA, two proportions, correlation) is available without touching imported data. CSV/SAV import, survival analysis, mixed models, meta-analysis, causal-inference workflows, and machine learning remain roadmap items.
 
-Methodology matching is deliberately conservative and is not a calibrated prediction model. It may stay silent when evidence is ambiguous, including some Turkish verb-final covariate phrasing. Its classifications are proposals only: the application never writes `confirmed=true` until the researcher reviews and explicitly accepts or edits them.
+Methodology matching uses local Ollama `qwen2.5:14b` as its primary engine and a deterministic rule extractor as its safe fallback. The model extracts the question, hypothesis, outcome, exposure, and covariates from the primary-analysis sentence, then matches those concepts to exact Excel column names. These classifications are not a calibrated prediction model. Until gold-set calibration is complete, LLM confidence is capped at `0.79`; the bulk-accept threshold is `0.80`, so the application never writes `confirmed=true` until the researcher reviews and explicitly accepts or edits each proposal.
 
 ## Architecture
 
@@ -65,7 +65,7 @@ Electron starts a bundled arm64 Python 3.12/FastAPI sidecar on `127.0.0.1` using
 
 The Python service is separated into independently tested modules:
 
-- `methodology_intake` and `extractors` — bounded local text extraction, evidence selection, and study-design proposals from DOCX, PDF, TXT, or Markdown;
+- `methodology_intake` and `extractors` — bounded text extraction from DOCX, PDF, TXT, or Markdown, evidence-bound local Ollama proposals, and a rule-based fallback for every failure mode;
 - `data_intake` — Excel loading, canonical column identities, structural profiling, and approved kinds;
 - `variable_reconciliation` — conservative methodology-to-column matching, conflict detection, and planner-impact pricing on disposable confirmed role copies;
 - `study_model` and `planner` — structured research metadata and deterministic, fail-closed analysis selection;
@@ -81,6 +81,7 @@ The Python service is separated into independently tested modules:
 - Imported workbooks are copied into an immutable project snapshot and fingerprinted with SHA-256.
 - The original methodology file is not copied into the project. Extracted text, source name, format, and fingerprint are stored locally inside the `.biostat` project so later study and variable review can reuse the same evidence.
 - Raw methodology paths never reach the renderer; one-use file capabilities are consumed by the Electron main process. Machine proposals remain unconfirmed until explicit human action.
+- Ollama is called only at the fixed `127.0.0.1:11434` loopback address. Methodology text may be sent to the local model; Excel cells and patient rows are not. Variable matching receives only column names, inferred kinds, unique-value counts, and non-missing counts.
 - Raw source paths, patient rows, and free-text service errors are excluded from persisted manifests and reports.
 - Data structure and analysis plan require separate explicit approvals.
 - A changed dataset, role snapshot, study brief, or plan invalidates downstream approvals and results.
@@ -122,6 +123,7 @@ Requirements:
 - Apple Silicon Mac
 - Node.js/npm
 - Python 3.12 (for example, `brew install python@3.12`)
+- Ollama and `qwen2.5:14b` for local-AI development and acceptance checks
 
 From a clean checkout:
 
@@ -155,18 +157,21 @@ Generated artifact:
 release/BioStat Studio-0.1.0-arm64.dmg
 ```
 
+The DMG bundles Python and the statistical engine, but not the 9 GB language model. To use local AI, start Ollama and ensure `qwen2.5:14b` is installed. If Ollama is stopped, document and Excel intake still work and the UI explicitly reports the narrower rule-based fallback.
+
 The current package is ad-hoc signed and not notarized because no Apple Developer ID is configured. The build runs its packaged renderer/preload checks, bundled sidecar self-test, strict code-signature verification, and DMG checksum verification before publishing the artifact. macOS Gatekeeper warnings are still expected when the build is copied to another Mac. Developer ID signing, hardened runtime, and notarization are required before general distribution.
 
 ## Current validation
 
-- Python scientific/service suite: **327 passed, 1 environment-gated skip**
-- Desktop suite: **76 passed**
+- Python scientific/service suite: **349 passed, 1 environment-gated skip**
+- Desktop suite: **82 passed**
 - TypeScript typecheck and production build: passed
 - Packaged arm64 renderer/preload, bundled sidecar, strict ad-hoc signature, and DMG checksum gates: passed
+- Real `Methods_Section.docx` plus the 500×54 `PassiveSurveillance.xlsx`: correct primary outcome/exposure/covariate matching with local `qwen2.5:14b`, both from source and from the service bundled inside the DMG
 - English/Turkish DOCX numerical parity and visual render review: passed
 - English/Turkish DOCX accessibility audit: 0 high, 0 medium, 0 low findings
 
-The remaining acceptance gate is an end-to-end run in the packaged application using a real research workbook, followed by operator review of both language reports.
+The remaining acceptance gate is human visual review and confirmation of the proposals in the packaged GUI, followed by operator review of both language reports.
 
 ## Roadmap
 

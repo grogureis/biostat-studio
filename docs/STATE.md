@@ -1,7 +1,41 @@
 # STATE.md — biostat-studio
 
 **Son güncelleme:** 2026-08-27 · Codex App
-**Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio`
+**Aktif geliştirme:** `.worktrees/methodology-intake` · `codex/local-llm-intake` (yayın birleştirmesi bekliyor)
+
+### Plan 3 yerel LLM entegrasyonu tamamlandı — 2026-08-27
+
+Kurulu Ollama `qwen2.5:14b` modeli artık metodoloji alımının birincil çıkarım
+motorudur; `RuleExtractor` model kapalı, zaman aşımı veya geçersiz yapılandırılmış
+yanıt durumlarında belirlenimci geri dönüş olarak kalır. Yerel motor başlık,
+araştırma sorusu, hipotez, tasarım ve birincil analiz rollerini kanıt cümlesiyle
+önerir; ikinci aşamada yalnızca değersiz `ColumnSummary` nesnelerini kullanarak
+kavramları gerçek Excel sütunlarına eşleştirir. Excel hücreleri ve hasta satırları
+modele gitmez. Ollama adresi sabit `127.0.0.1:11434`; bulut/uzak geri dönüş yoktur.
+
+Kalibre edilmemiş LLM güveni `0.79` ile sınırlıdır. Toplu kabul eşiği `0.80`
+olduğundan yerel model hiçbir rolü `confirmed=true` yapamaz. Kullanıcının onayladığı
+gerçek sütun rolleri belge kavramlarını kalıcı `StudyBrief` içinde değiştirir;
+planlayıcıya kavram etiketi değil onaylı Excel sütunu gider. UI; Excel seçimi,
+profil okuma, çalışma özeti ve eşleştirme hatalarını ayrı ve eyleme dönük
+mesajlarla gösterir.
+
+Gerçek kabul ölçümü: `Methods_Section.docx` (9.373 karakter) ve
+`PassiveSurveillance.xlsx` (`Analiz_Verisi`, 500 satır, 54 sütun) hem kaynak
+ortamında hem yeni DMG içindeki paketli serviste `local:qwen2.5:14b` kullandı.
+Birincil sonuç `kötüleşme_primer`, maruziyet `öğrenci_bildirimi`, kovaryatlar
+`news2_ilk`, `yaş`, `cinsiyet` olarak önerildi. Firth lojistik regresyon, Little MCAR
+testi ve multiple imputation mevcut sürümde destekleniyormuş gibi sunulmadı.
+
+Taze kapılar: Python **349 geçti + 1 ortam koşullu skip**, desktop **82/82**,
+TypeScript typecheck, Vite üretim derlemesi ve `git diff --check` temiz. Yeni arm64
+DMG; paketli renderer/preload, gömülü servis öz testi, katı ad-hoc imza,
+`hdiutil verify` ve paketli yerel-LLM gerçek dosya kabulünden geçti. Teslim:
+`release/BioStat Studio-0.1.0-arm64.dmg` (189 MB), SHA-256
+`09b246d6111ac5a1dafba7af3e9b8c63c719ed83ec05a132229ea5e83abdacf9`.
+DMG 9 GB modeli içermez; Ollama ve `qwen2.5:14b` bu Mac'te kurulu/açık olmalıdır.
+Kalan ürün kapısı paketli grafik arayüzde insanın önerileri görsel olarak
+onaylaması ve iki dilli raporları operatör olarak incelemesidir.
 
 ### Metodoloji akışı ana geliştirme dalına alındı — 2026-08-27
 
@@ -249,7 +283,7 @@ Plan 2 sıfırdan kurmayacak; ikisi de çalışır durumda:
   (`continuous` → `to_numeric`, `binary`/`categorical` → `string`). Bulgu A-2'yi kapatmak
   için **yeni dönüşüm kodu gerekmiyor**; eksik olan doküman düzeltmesi ve insan kapısı.
 
-### 0c. Yerel LLM — ÖN ÖLÇÜM YAPILDI (2026-08-24), Plan 3 kararı bekliyor
+### 0c. Yerel LLM — tarihsel Plan 3 ön ölçüm kaydı (2026-08-24)
 **Durum:** Ollama'da model yoktu, hiçbir şey ölçülmemişti. Artık ölçüldü.
 Ölçüm düzeneği depoda: `scripts/eval/` (`gold_set.json`, `run_eval.py`, `--fetch`).
 Korpus metinleri **commit edilmedi** (PMC açık erişim yeniden dağıtımı belirsiz); kimlikler,
