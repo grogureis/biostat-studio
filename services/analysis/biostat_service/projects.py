@@ -164,6 +164,7 @@ class MethodologyRecord:
     original_name: str
     char_count: int
     truncated: bool
+    extraction_engine: str | None = None
 
 
 def _json_value(value: Any) -> Any:
@@ -559,7 +560,10 @@ def append_audit_event(project: LocalProject, event: Mapping[str, Any]) -> None:
 # import here would create a circular dependency. This deferred-import pattern is the
 # same rationale as sha256_file inside load_project (line 436).
 def attach_methodology(
-    project: LocalProject, document: Any, original_name: str
+    project: LocalProject,
+    document: Any,
+    original_name: str,
+    extraction_engine: str | None = None,
 ) -> None:
     """Store the extracted text next to the workbook snapshot, atomically.
 
@@ -571,7 +575,7 @@ def attach_methodology(
     destination.parent.mkdir(parents=True, exist_ok=True)
     _atomic_text_write(destination, document.text)
     manifest = _read_manifest(project)
-    manifest["methodology"] = {
+    methodology_record = {
         "relative_path": METHODOLOGY_RELATIVE.as_posix(),
         "sha256": document.source_sha256,
         "source_format": document.source_format,
@@ -579,6 +583,9 @@ def attach_methodology(
         "char_count": document.char_count,
         "truncated": document.truncated,
     }
+    if extraction_engine is not None:
+        methodology_record["extraction_engine"] = extraction_engine
+    manifest["methodology"] = methodology_record
     _validate_relative_references(project.root, manifest)
     atomic_json_write(project.manifest_path, manifest)
 
@@ -599,4 +606,9 @@ def read_methodology(project: LocalProject) -> MethodologyRecord | None:
         original_name=str(record.get("original_name", "")),
         char_count=int(record.get("char_count", 0)),
         truncated=bool(record.get("truncated", False)),
+        extraction_engine=(
+            str(record["extraction_engine"])
+            if isinstance(record.get("extraction_engine"), str)
+            else None
+        ),
     )

@@ -456,6 +456,39 @@ def test_attached_methodology_survives_a_reload(
     assert manifest["schema_version"] == 2
 
 
+def test_attached_methodology_remembers_the_local_extraction_engine(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "data.xlsx", ["group", "outcome"])
+    project = create_project(tmp_path / "study.biostat", brief, profile_excel(source))
+
+    attach_methodology(
+        project,
+        _document(),
+        "yontem.docx",
+        extraction_engine="local:qwen2.5:14b",
+    )
+
+    record = read_methodology(project)
+    assert record is not None
+    assert record.extraction_engine == "local:qwen2.5:14b"
+    manifest = json.loads(project.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["methodology"]["extraction_engine"] == "local:qwen2.5:14b"
+
+
+def test_old_methodology_manifest_without_an_engine_remains_readable(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "data.xlsx", ["group", "outcome"])
+    project = create_project(tmp_path / "study.biostat", brief, profile_excel(source))
+    attach_methodology(project, _document(), "yontem.docx")
+
+    record = read_methodology(project)
+
+    assert record is not None
+    assert record.extraction_engine is None
+
+
 def test_a_project_without_a_document_reads_as_none(
     tmp_path: Path, brief: StudyBrief
 ) -> None:

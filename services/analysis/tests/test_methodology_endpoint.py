@@ -10,14 +10,36 @@ from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from biostat_service.app import _proposal_payload, create_app
-from biostat_service.extractors.contracts import EVIDENCE_MAX_CHARS, Proposal
+from biostat_service.extractors.contracts import (
+    EVIDENCE_MAX_CHARS,
+    BriefProposal,
+    Proposal,
+)
+from biostat_service.extractors.engine import (
+    EngineStatus,
+    ExtractionRun,
+    MethodologyEngine,
+    VariableRun,
+)
+from biostat_service.extractors.rule import RuleExtractor
 from biostat_service.methodology_intake import MAX_DOCUMENT_CHARS
+
+
+class UnavailableLocalExtractor:
+    name = "local:qwen2.5:14b"
+
+    def available(self) -> bool:
+        return False
+
+
+def rule_fallback_engine() -> MethodologyEngine:
+    return MethodologyEngine(local=UnavailableLocalExtractor(), rule=RuleExtractor())  # type: ignore[arg-type]
 
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
-    with TestClient(create_app()) as test_client:
+    with TestClient(create_app(methodology_engine_factory=rule_fallback_engine)) as test_client:
         yield test_client
 
 
@@ -83,6 +105,53 @@ def test_extracts_design_from_a_text_document(client: TestClient, tmp_path: Path
     assert body["brief"]["design"]["value"] == "cohort"
     assert body["brief"]["design"]["source"] == "rule"
     assert body["brief"]["design"]["evidence"]
+    assert body["engine"] == {
+        "requested": "local:qwen2.5:14b",
+        "used": "rule",
+        "fallback_reason": "local_llm_unavailable",
+    }
+
+
+def test_extract_endpoint_publishes_local_engine_status_without_paths_or_raw_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("BIOSTAT_SESSION_TOKEN", "test-token")
+    proposal = Proposal(
+        value="cohort",
+        confidence=0.79,
+        source="local:qwen2.5:14b",
+        evidence="prospective cohort",
+        evidence_offset=8,
+    )
+
+    class StubEngine:
+        def extract(self, _document):
+            return ExtractionRun(
+                BriefProposal(design=proposal),
+                EngineStatus(
+                    requested="local:qwen2.5:14b", used="local:qwen2.5:14b"
+                ),
+            )
+
+        def variables(self, _document, _columns):
+            return VariableRun((), EngineStatus("local:qwen2.5:14b", "local:qwen2.5:14b"))
+
+    path = tmp_path / "private-protocol.txt"
+    path.write_text("Methods\nprospective cohort", encoding="utf-8")
+    with TestClient(create_app(methodology_engine_factory=StubEngine)) as local_client:
+        response = local_client.post(
+            "/v1/methodology/extract",
+            json={"source_path": str(path)},
+            headers=headers(),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["engine"] == {
+        "requested": "local:qwen2.5:14b",
+        "used": "local:qwen2.5:14b",
+        "fallback_reason": None,
+    }
+    assert str(tmp_path) not in response.text
 
 
 def test_rejects_unsupported_format_with_a_stable_code(client: TestClient, tmp_path: Path) -> None:
@@ -287,6 +356,7 @@ def test_project_created_with_a_methodology_document_attaches_it(
         "original_name": "yontem-created.docx",
         "char_count": 24,
         "truncated": False,
+        "extraction_engine": "local:qwen2.5:14b",
     }
 
     project_id = _create_project(client, tmp_path, methodology=methodology_payload)
@@ -310,6 +380,7 @@ def test_project_created_with_a_methodology_document_attaches_it(
     context = client.app.state.projects[UUID(project_id)]
     assert context.methodology is not None
     assert context.methodology.original_name == "yontem-created.docx"
+    assert context.methodology.extraction_engine == "local:qwen2.5:14b"
 
 
 def test_variable_proposals_price_a_document_data_conflict(

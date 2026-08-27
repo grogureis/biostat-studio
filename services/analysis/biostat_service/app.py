@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import shutil
 from threading import Lock
@@ -30,6 +32,8 @@ from .extractors.contracts import (
     RoleProposal,
     column_summaries,
 )
+from .extractors.engine import EngineStatus, MethodologyEngine
+from .extractors.local import LocalExtractor
 from .extractors.rule import RuleExtractor
 from .methodology_intake import (
     MAX_DOCUMENT_CHARS,
@@ -83,6 +87,9 @@ class MethodologyPayload(BaseModel):
     original_name: str = Field(min_length=1, max_length=255)
     char_count: int = Field(ge=0)
     truncated: bool = False
+    extraction_engine: Optional[str] = Field(
+        default=None, max_length=128, pattern=r"^[A-Za-z0-9._:/-]+$"
+    )
 
 
 class ProjectRequest(BaseModel):
@@ -601,11 +608,32 @@ def _approved_execution_snapshot(
         )
 
 
-def create_app() -> FastAPI:
+def _default_methodology_engine() -> MethodologyEngine:
+    model = os.environ.get("BIOSTAT_LOCAL_LLM_MODEL", "qwen2.5:14b").strip()
+    if not model or len(model) > 128 or any(
+        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:/-"
+        for character in model
+    ):
+        model = "qwen2.5:14b"
+    return MethodologyEngine(local=LocalExtractor(model=model), rule=RuleExtractor())
+
+
+def _engine_payload(status: EngineStatus) -> dict[str, str | None]:
+    return {
+        "requested": status.requested,
+        "used": status.used,
+        "fallback_reason": status.fallback_reason,
+    }
+
+
+def create_app(
+    methodology_engine_factory: Callable[[], MethodologyEngine] = _default_methodology_engine,
+) -> FastAPI:
     """Create a local-only API without public docs or data-bearing error messages."""
     session_token()
     projects: dict[UUID, ProjectContext] = {}
     manager = JobManager(max_workers=1)
+    methodology_engine = methodology_engine_factory()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -685,7 +713,8 @@ def create_app() -> FastAPI:
                 status_code=422, detail="methodology_intake_failed:unreadable_document"
             ) from exc
 
-        brief = _brief_proposal_payload(RuleExtractor().extract_brief(document))
+        extraction_run = methodology_engine.extract(document)
+        brief = _brief_proposal_payload(extraction_run.brief)
         return {
             "source_sha256": document.source_sha256,
             "source_format": document.source_format,
@@ -698,6 +727,7 @@ def create_app() -> FastAPI:
             "text": document.text,
             "warnings": _merged_warnings(document.warnings, brief["warnings"]),
             "brief": brief,
+            "engine": _engine_payload(extraction_run.status),
         }
 
     @v1.post("/projects")
@@ -715,6 +745,7 @@ def create_app() -> FastAPI:
                     project,
                     _methodology_document(request.methodology),
                     request.methodology.original_name,
+                    request.methodology.extraction_engine,
                 )
                 append_audit_event(
                     project, {"type": "methodology_document_attached", "actor": "user"}
@@ -742,7 +773,10 @@ def create_app() -> FastAPI:
         context = _get_context(projects, project_id)
         with context.state_lock:
             attach_methodology(
-                context.project, _methodology_document(request), request.original_name
+                context.project,
+                _methodology_document(request),
+                request.original_name,
+                request.extraction_engine,
             )
             context.methodology = read_methodology(context.project)
             append_audit_event(
@@ -764,11 +798,10 @@ def create_app() -> FastAPI:
             truncated=context.methodology.truncated,
             warnings=(),
         )
-        engine = RuleExtractor()
-        concepts = engine.extract_brief(document)
-        proposals = engine.match_variables(
-            document, concepts, column_summaries(context.profile)
+        variable_run = methodology_engine.variables(
+            document, column_summaries(context.profile)
         )
+        proposals = variable_run.proposals
         roles = _proposed_roles(context, proposals)
         conflicts = price_conflicts(
             context.brief,
@@ -779,6 +812,7 @@ def create_app() -> FastAPI:
         return {
             "proposals": [_role_proposal_payload(item) for item in proposals],
             "conflicts": [_conflict_payload(item) for item in conflicts],
+            "engine": _engine_payload(variable_run.status),
         }
 
     @v1.post("/projects/open")
