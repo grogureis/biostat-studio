@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BioStat Studio Mimarisi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#F5F7F3;
+    --surface:#FFFFFF;
+    --surface-2:#EAEFE7;
+    --ink:#141F19;
+    --ink-2:#4B5B51;
+    --ink-3:#7B8C81;
+    --line:#D4DCD1;
+    --line-2:#BCC7B8;
+    --science:#14503C;
+    --service:#AF5230;
+    --shell:#4A6076;
+    --store:#6C7F71;
+    --focus:#14503C;
+    --shadow:0 1px 2px rgba(20,31,25,.06), 0 8px 24px -18px rgba(20,31,25,.35);
+    --step:clamp(1rem, .82rem + .9vw, 1.5rem);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0D1411;
+      --surface:#16201B;
+      --surface-2:#1E2A24;
+      --ink:#E7EEE8;
+      --ink-2:#A8B9AE;
+      --ink-3:#7D8F84;
+      --line:#2A3830;
+      --line-2:#3B4B41;
+      --science:#74C79C;
+      --service:#E28C63;
+      --shell:#8FAEC8;
+      --store:#9AB0A1;
+      --focus:#74C79C;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -20px rgba(0,0,0,.9);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0D1411;
+    --surface:#16201B;
+    --surface-2:#1E2A24;
+    --ink:#E7EEE8;
+    --ink-2:#A8B9AE;
+    --ink-3:#7D8F84;
+    --line:#2A3830;
+    --line-2:#3B4B41;
+    --science:#74C79C;
+    --service:#E28C63;
+    --shell:#8FAEC8;
+    --store:#9AB0A1;
+    --focus:#74C79C;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 30px -20px rgba(0,0,0,.9);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1280px;margin:0 auto;padding:clamp(1.5rem,1rem+3vw,4rem) clamp(1rem,.6rem+2vw,2.5rem) 5rem;}
+
+  .eyebrow{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-3);margin:0 0 1rem;
+  }
+  h1{
+    font-family:"IBM Plex Serif",Georgia,serif;
+    font-weight:600;
+    font-size:clamp(2rem,1.4rem+2.6vw,3.35rem);
+    line-height:1.06;letter-spacing:-.02em;margin:0;text-wrap:balance;
+  }
+  h1 .thin{color:var(--ink-2);font-weight:500}
+  .deck{max-width:62ch;color:var(--ink-2);margin:1.1rem 0 0;font-size:1.02rem}
+
+  .chips{display:flex;flex-wrap:wrap;gap:.5rem;margin:1.6rem 0 0;padding:0;list-style:none}
+  .chips li{
+    font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.02em;
+    color:var(--ink-2);background:var(--surface);border:1px solid var(--line);
+    border-radius:999px;padding:.32rem .7rem;
+  }
+
+  h2{
+    font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;
+    font-size:clamp(1.3rem,1.1rem+.8vw,1.7rem);letter-spacing:-.01em;
+    margin:0 0 .4rem;text-wrap:balance;
+  }
+  .lede{color:var(--ink-2);max-width:64ch;margin:0 0 1.4rem}
+  section{margin-top:clamp(3rem,2rem+4vw,5rem)}
+  .rule{height:1px;background:var(--line);border:0;margin:0 0 1.5rem}
+
+  /* ---------- toolbar ---------- */
+  .toolbar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:1rem}
+  .toolbar .sep{flex:1 1 auto}
+  button{
+    font-family:"IBM Plex Mono",monospace;font-size:.74rem;letter-spacing:.03em;
+    color:var(--ink-2);background:var(--surface);border:1px solid var(--line);
+    border-radius:7px;padding:.42rem .8rem;cursor:pointer;
+    transition:border-color .18s,color .18s,background .18s;
+  }
+  button:hover{border-color:var(--line-2);color:var(--ink)}
+  button[aria-pressed="true"]{color:var(--surface);background:var(--ink);border-color:var(--ink)}
+  button.play{color:var(--surface);background:var(--science);border-color:var(--science)}
+  button.play:hover{filter:saturate(1.15) brightness(1.06)}
+  button.play[disabled]{opacity:.55;cursor:progress}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  .dot{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;margin-right:.42rem;vertical-align:baseline}
+
+  /* ---------- map ---------- */
+  .map{display:grid;grid-template-columns:minmax(0,1fr) 306px;gap:1.25rem;align-items:start}
+  @media (max-width:960px){.map{grid-template-columns:minmax(0,1fr)}}
+  figure{margin:0}
+  .canvas{
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    box-shadow:var(--shadow);overflow-x:auto;padding:.35rem;
+  }
+  svg#map{display:block;width:100%;min-width:760px;height:auto;color:var(--ink-2)}
+  figcaption{color:var(--ink-3);font-size:.85rem;margin-top:.85rem;max-width:70ch}
+
+  .node rect.body{fill:var(--surface);stroke:var(--line-2);stroke-width:1.1;transition:stroke .2s,stroke-width .2s,fill .2s}
+  .node text.t{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:500;fill:var(--ink)}
+  .node text.s{font-family:"IBM Plex Sans",sans-serif;font-size:10px;fill:var(--ink-3)}
+  .node{cursor:pointer}
+  .node.dim{opacity:.28}
+  .node.on rect.body{stroke:var(--nc, var(--line-2));stroke-width:2;fill:var(--surface-2)}
+  .node.on text.s{fill:var(--ink-2)}
+  .node:focus-visible rect.body{stroke:var(--focus);stroke-width:2}
+  .node:focus{outline:none}
+
+  .edge{fill:none;stroke:currentColor;stroke-opacity:.34;stroke-width:1.2;transition:stroke-opacity .2s,stroke-width .2s,stroke .2s}
+  .edge.audit{stroke-dasharray:2 5;stroke-opacity:.4}
+  .edge.boundary{stroke:var(--service);stroke-opacity:.85;stroke-dasharray:7 5;stroke-width:1.6}
+  .edge.on{stroke-opacity:1;stroke-width:2.2}
+  .edge.dim{stroke-opacity:.08}
+  .pkt{fill:currentColor;opacity:.4;transition:opacity .2s}
+  .pkt.on{opacity:1}
+  .pkt.dim{opacity:.05}
+  .pkt.boundary{fill:var(--service)}
+  .elabel{font-family:"IBM Plex Mono",monospace;font-size:9.5px;fill:var(--ink-2);opacity:0;transition:opacity .18s;pointer-events:none}
+  .elabel.show{opacity:1}
+  .elabel rect{fill:var(--surface);stroke:var(--line);stroke-width:.8;rx:3}
+  .zone rect{fill:none;stroke:var(--service);stroke-opacity:.5;stroke-width:1;stroke-dasharray:3 6}
+  .zone text{font-family:"IBM Plex Mono",monospace;font-size:9.5px;fill:var(--service);letter-spacing:.05em}
+
+  /* ---------- inspector ---------- */
+  .inspector{
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    padding:1.1rem 1.15rem 1.25rem;box-shadow:var(--shadow);position:sticky;top:1rem;
+  }
+  .inspector .kicker{font-family:"IBM Plex Mono",monospace;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:0 0 .55rem}
+  .inspector h3{font-family:"IBM Plex Mono",monospace;font-size:1.02rem;font-weight:500;margin:0 0 .1rem;color:var(--ink)}
+  .inspector .layer{font-size:.76rem;color:var(--ink-3);margin:0 0 .8rem}
+  .inspector p.desc{font-size:.9rem;color:var(--ink-2);margin:0 0 1rem}
+  .io{list-style:none;margin:0;padding:.85rem 0 0;border-top:1px solid var(--line)}
+  .io li{font-size:.79rem;color:var(--ink-2);display:flex;gap:.5rem;padding:.22rem 0}
+  .io .ar{font-family:"IBM Plex Mono",monospace;color:var(--ink-3);flex:0 0 auto}
+  .io code{font-family:"IBM Plex Mono",monospace;font-size:.76rem;color:var(--ink)}
+
+  /* ---------- legend ---------- */
+  .legend{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem;margin-top:1rem;padding:0;list-style:none;font-size:.78rem;color:var(--ink-3)}
+  .legend li{display:flex;align-items:center;gap:.5rem}
+  .legend svg{flex:0 0 auto}
+
+  /* ---------- pipeline ---------- */
+  .rail{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:.5rem .4rem;box-shadow:var(--shadow);overflow-x:auto}
+  svg#flow{display:block;width:100%;min-width:720px;height:auto;color:var(--ink-2)}
+  #flow .stn{fill:var(--surface);stroke:var(--line-2);stroke-width:1.1}
+  #flow .num{font-family:"IBM Plex Mono",monospace;font-size:11px;fill:var(--ink);font-weight:500}
+  #flow .lab{font-family:"IBM Plex Sans",sans-serif;font-size:10.5px;fill:var(--ink-2)}
+  #flow .track{stroke:currentColor;stroke-opacity:.3;stroke-width:1.2;fill:none}
+  #flow .pulse{fill:var(--science)}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:1.25rem}
+  .steps div{background:var(--surface);padding:.9rem 1rem}
+  .steps b{display:block;font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--ink-3);font-weight:500;margin-bottom:.3rem;font-variant-numeric:tabular-nums}
+  .steps p{margin:0;font-size:.85rem;color:var(--ink-2)}
+
+  /* ---------- phases ---------- */
+  .phases{list-style:none;margin:0;padding:0;counter-reset:p}
+  .phases li{
+    display:grid;grid-template-columns:2.6rem minmax(0,1fr);gap:1rem;
+    padding:1rem 0;border-top:1px solid var(--line);align-items:baseline;
+  }
+  .phases li:last-child{border-bottom:1px solid var(--line)}
+  .phases .n{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--service);font-variant-numeric:tabular-nums}
+  .phases h4{margin:0 0 .2rem;font-size:.98rem;font-weight:600}
+  .phases p{margin:0;color:var(--ink-2);font-size:.9rem;max-width:70ch}
+
+  footer{margin-top:4rem;padding-top:1.25rem;border-top:1px solid var(--line);color:var(--ink-3);font-size:.8rem}
+  footer code{font-family:"IBM Plex Mono",monospace;font-size:.76rem;color:var(--ink-2)}
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:.001ms !important;transition-duration:.05s !important}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">mimari haritası · codex/biostat-studio · 2026-08-15</p>
+    <h1>BioStat Studio <span class="thin">mimarisi</span></h1>
+    <p class="deck">Tümüyle çevrimdışı çalışan bir macOS masaüstü biyoistatistik uygulaması: Electron kabuğu, yalnızca loopback üzerinden konuşan kimlik doğrulamalı bir Python servisi ve bağımsız test edilebilir bilimsel modüller. Haritadaki düğümlere tıklayın; kenarlar hangi verinin nereye aktığını taşır.</p>
+    <ul class="chips">
+      <li>Apple Silicon</li>
+      <li>çevrimdışı · telemetri yok</li>
+      <li>Electron + Python sidecar</li>
+      <li>6 aşamalı iş akışı</li>
+      <li>doğrulanmış yayın öncesi dikey kesit</li>
+    </ul>
+  </header>
+
+  <section aria-labelledby="h-map">
+    <h2 id="h-map">Bileşen haritası</h2>
+    <p class="lede">Ayrıcalıklı hiçbir çağrı arayüzden doğrudan geçmez; her şey tipli köprü ve token'lı yerel servis üzerinden akar.</p>
+
+    <div class="toolbar">
+      <button class="play" id="play">▶ Uçtan uca akışı oynat</button>
+      <button id="labels" aria-pressed="false">kenar etiketleri</button>
+      <span class="sep"></span>
+      <button data-layer="shell" aria-pressed="false"><span class="dot" style="background:var(--shell)"></span>kabuk</button>
+      <button data-layer="service" aria-pressed="false"><span class="dot" style="background:var(--service)"></span>servis</button>
+      <button data-layer="science" aria-pressed="false"><span class="dot" style="background:var(--science)"></span>bilimsel modüller</button>
+      <button data-layer="store" aria-pressed="false"><span class="dot" style="background:var(--store)"></span>veri &amp; çıktı</button>
+      <button id="reset">düzeni sıfırla</button>
+    </div>
+
+    <div class="map">
+      <figure>
+        <div class="canvas">
+          <svg id="map" viewBox="0 0 1240 780" role="group" aria-label="BioStat Studio bileşen haritası: Electron kabuğu, kimlik doğrulamalı loopback servisi, bilimsel modüller ve yerel kalıcılık arasındaki veri akışı."></svg>
+        </div>
+        <figcaption>Şekil 1 — İstek arayüzden tipli köprüye, oradan efemeral portta token ile korunan yerel servise geçer. Bilimsel modüller planı üretir, çalıştırır ve tablo, şekil ile anlatıyı <em>aynı</em> sonuç nesnelerinden türetir. Düğümler sürüklenebilir.</figcaption>
+        <ul class="legend">
+          <li><svg width="34" height="8" aria-hidden="true"><line x1="1" y1="4" x2="33" y2="4" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4"/></svg> veri akışı</li>
+          <li><svg width="34" height="8" aria-hidden="true"><line x1="1" y1="4" x2="33" y2="4" stroke="var(--service)" stroke-width="1.6" stroke-dasharray="7 5"/></svg> kimlik doğrulamalı loopback sınırı</li>
+          <li><svg width="34" height="8" aria-hidden="true"><line x1="1" y1="4" x2="33" y2="4" stroke="currentColor" stroke-opacity=".45" stroke-width="1.4" stroke-dasharray="2 5"/></svg> kalıcılık &amp; denetim izi</li>
+        </ul>
+        <p class="sr" id="a11y-summary"></p>
+      </figure>
+
+      <aside class="inspector" id="inspector" aria-live="polite">
+        <p class="kicker">düğüm</p>
+        <h3 id="i-name">Bir düğüm seçin</h3>
+        <p class="layer" id="i-layer">Haritadaki kutulara tıklayın ya da klavyeyle gezinin.</p>
+        <p class="desc" id="i-desc">Seçtiğiniz bileşenin sorumluluğu, girdileri ve çıktıları burada listelenir.</p>
+        <ul class="io" id="i-io"></ul>
+      </aside>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-flow">
+    <h2 id="h-flow">Veri akışı ve kalıcılık</h2>
+    <p class="lede">Yedi adımın sırası mekanizmanın kendisidir: kaynak dosya asla değişmez, her çıktı belirli bir veri ve plan sürümünden türetilir.</p>
+    <div class="rail">
+      <svg id="flow" viewBox="0 0 1200 130" role="img" aria-label="Yedi adımlı veri akışı: kaynak dosya, proje, anlık görüntü, plan, iş, türetme, dışa aktarım."></svg>
+    </div>
+    <div class="steps">
+      <div><b>01 · kaynak</b><p>Dosya salt okunur açılır ve parmak izi alınır; hiçbir koşulda değiştirilmez.</p></div>
+      <div><b>02 · proje</b><p>Yerel proje meta veriyi ve üretilen çıktılara göreli referansları tutar.</p></div>
+      <div><b>03 · anlık görüntü</b><p>İçe aktarma tipli bir veri anlık görüntüsü ve veri kalitesi raporu üretir.</p></div>
+      <div><b>04 · plan</b><p>Onaylanan çalışma metadata'sı sürümlenmiş bir analiz planına dönüşür.</p></div>
+      <div><b>05 · iş</b><p>Analiz işi tam olarak o veri ve plan sürümünü tüketir, yapılandırılmış sonuç yazar.</p></div>
+      <div><b>06 · türetme</b><p>Tablo, şekil ve anlatı aynı sonuç nesnelerinden üretilir — ikinci bir hesap yolu yok.</p></div>
+      <div><b>07 · dışa aktarım</b><p>Rapor dili, sürümler, tohumlar, dönüşümler, dışlamalar ve uyarılar kayda geçer.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-phase">
+    <h2 id="h-phase">Teslim fazları</h2>
+    <p class="lede">Her faz uygulamayı çalışır ve doğrulanmış halde bırakır; bir yöntem, referans testleri geçmeden arayüzde görünmez.</p>
+    <ol class="phases">
+      <li><span class="n">01</span><div><h4>Kabuk ve iskelet</h4><p>Masaüstü kabuğu, Clinical Calm iş akışı, proje kalıcılığı, Excel içe aktarma, kimlik doğrulamalı yerel servis.</p></div></li>
+      <li><span class="n">02</span><div><h4>Çekirdek bilim</h4><p>Çalışma modeli, deterministik planlayıcı, tanımlayıcı/grup/kategorik/korelasyon/regresyon analizleri, sonuç sözleşmeleri, iki dilli Word raporu.</p></div></li>
+      <li><span class="n">03</span><div><h4>İleri yöntemler</h4><p>Sağkalım, tekrarlı ölçümler, karma modeller, ROC, eksik veri araçları, güç analizi, meta-analiz.</p></div></li>
+      <li><span class="n">04</span><div><h4>Makine öğrenmesi <em>(yol haritası)</em></h4><p>Sızıntıya kapalı pipeline'lar, model karşılaştırma, kalibrasyon, yorumlanabilirlik. Haritadaki <code>ml</code> modülü henüz kodda yok; sağkalım, karma modeller, meta-analiz ve CSV/SAV içe aktarma da bu grupta.</p></div></li>
+      <li><span class="n">05</span><div><h4>Sertleştirme</h4><p>Bilimsel referans doğrulaması, paketleme, temiz makinede doğrulama, erişilebilirlik, imzalama/noterleme rehberi.</p></div></li>
+    </ol>
+  </section>
+
+  <footer>
+    Kaynak: <code>docs/superpowers/specs/2026-08-15-biostat-desktop-design.md</code> ve <code>docs/superpowers/plans/2026-08-15-biostat-studio-vertical-slice.md</code> — dal <code>codex/biostat-studio</code>.
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var LAYERS = {
+    shell:   {name:"Kabuk · Electron",       color:"var(--shell)"},
+    service: {name:"Yerel servis sınırı",    color:"var(--service)"},
+    science: {name:"Bilimsel modül · Python",color:"var(--science)"},
+    store:   {name:"Veri ve çıktı",          color:"var(--store)"}
+  };
+
+  var NODES = [
+    {id:"renderer",   t:"Renderer",      s:"Clinical Calm arayüzü",     l:"shell",   x:120, y:150,
+     d:"Altı aşamalı iş akışını çizer. İşletim sistemine, dosya sistemine ve ağa doğrudan erişimi yoktur."},
+    {id:"preload",    t:"Preload Bridge",s:"tipli, dar IPC yüzeyi",     l:"shell",   x:120, y:300,
+     d:"Ayrıcalıklı her çağrının geçtiği tek kapı. Yüzey bilinçli olarak dar ve tipli tutulur."},
+    {id:"main",       t:"Electron Main", s:"yaşam döngüsü + sidecar",   l:"shell",   x:120, y:450,
+     d:"Uygulama yaşam döngüsü, yerel dosya diyalogları, menü, dil ve Python yan sürecinin sahibi. Uygulama kapanınca servisi sonlandırır."},
+    {id:"service",    t:"service",       s:"kimlik doğrulamalı API",    l:"service", x:430, y:300,
+     d:"Loopback üzerinde efemeral portta dinler, oturuma özel token ister. Kimliksiz ve loopback dışı istekleri reddeder. İş kimlikleri, ilerleme olayları, iptal ve yapılandırılmış hatalar buradan yönetilir."},
+    {id:"data_intake",t:"data_intake",   s:"okuma · şema · doğrulama",  l:"science", x:690, y:110,
+     d:"Excel birincil, CSV ve SPSS ikincil format olarak okunur; şema çıkarılır, doğrulanır ve kaynak değişmez tutulur."},
+    {id:"study_model",t:"study_model",   s:"tasarım + değişken rolleri",l:"science", x:690, y:265,
+     d:"Araştırma sorusu, hipotezler, çalışma tasarımı, popülasyon, uç noktalar ve değişken rollerinin yapılandırılmış hâli."},
+    {id:"planner",    t:"planner",       s:"deterministik seçim",       l:"science", x:820, y:190,
+     d:"Serbest metni tek başına kanıt saymaz; onaylı yapısal metadata ile birleştirir. Her plan maddesi gerekçe, varsayım, alternatif, çokluk stratejisi ve çıktı sözleşmesi taşır. Onay olmadan analiz çalışmaz."},
+    {id:"analyses",   t:"analyses",      s:"doğrulanmış yöntem kümesi", l:"science", x:1075,y:110,
+     d:"Welch t, eşleştirilmiş t, Welch ANOVA, ki-kare/Fisher, Pearson ve Spearman, Mann–Whitney U, Wilcoxon işaretli sıralar, Holm düzeltmeli Dunn ile Kruskal–Wallis, HC3 kovaryanslı doğrusal regresyon ve ikili lojistik regresyon — hepsi tek bir sonuç nesnesi biçimi üretir."},
+    {id:"power",      t:"power",         s:"a-priori güç · veri yok",   l:"science", x:430, y:120,
+     d:"İki örneklem ve eşleştirilmiş t testi, tek yönlü ANOVA, iki oran ve korelasyon için a-priori güç ve örneklem büyüklüğü hesabı. İçe aktarılan veriye dokunmaz; bu yüzden proje akışının dışında, doğrudan servise bağlı ayrı bir araçtır."},
+    {id:"results",    t:"contracts",     s:"tipli tek sonuç sözleşmesi",l:"store",   x:860, y:380,
+     d:"Tablo, şekil ve anlatının ortak kaynağı. İkinci bir hesaplama yolu olmadığı için rapordaki sayı ile ekrandaki sayı ayrışamaz."},
+    {id:"visuals",    t:"visuals",       s:"yayın kalitesinde şekil",   l:"science", x:1075,y:400,
+     d:"Renk körlüğüne uygun paletler, dergi sütun genişliğinde okunur etiketler; yüksek çözünürlüklü PNG ve mümkün olduğunda vektör SVG."},
+    {id:"reporting",  t:"reporting",     s:"iki dilli Word montajı",    l:"science", x:1075,y:545,
+     d:"Anlatı, tablolar, başlıklar ve alt yazılar. İngilizce varsayılan, Türkçe seçenek; sayısal sonuçlar iki dilde birebir aynı."},
+    {id:"projects",   t:"projects",      s:"sürüm + denetim izi",       l:"store",   x:430, y:590,
+     d:"Taşınabilir yerel proje klasörü: girdiler, kararlar, dönüşümler, sürümler, uyarılar ve çıktılar. Autosave atomiktir ve orijinal veriyi asla ezmez."},
+    {id:"source",     t:"Kaynak veri",   s:".xlsx · salt okunur",       l:"store",   x:300, y:690,
+     d:"Salt okunur açılır ve parmak izi alınır. Uygulama kaynak dosyayı hiçbir adımda değiştirmez."},
+    {id:"docx",       t:"Results .docx", s:"EN varsayılan · TR opsiyon",l:"store",   x:1075,y:690,
+     d:"Numaralı tablo ve şekiller, etki tahminleri, %95 güven aralıkları, tam p değerleri, örneklem büyüklükleri ve eksik veri notlarıyla düzenlenebilir Word çıktısı."}
+  ];
+
+  var EDGES = [
+    {f:"renderer",   t:"preload",    l:"tipli invoke",                    k:"data",     b:0},
+    {f:"preload",    t:"main",       l:"IPC",                             k:"data",     b:0},
+    {f:"main",       t:"service",    l:"spawn · efemeral port · token",   k:"boundary", b:.10},
+    {f:"service",    t:"main",       l:"iş · ilerleme · iptal",           k:"data",     b:.30},
+    {f:"service",    t:"data_intake",l:"içe aktarma işi",                 k:"data",     b:-.08},
+    {f:"source",     t:"data_intake",l:"salt okunur · parmak izi",        k:"audit",    b:.10},
+    {f:"service",    t:"study_model",l:"onaylı çalışma metadata'sı",      k:"data",     b:.05},
+    {f:"data_intake",t:"planner",    l:"veri profili + tipler",           k:"data",     b:.06},
+    {f:"study_model",t:"planner",    l:"tasarım · roller · uç noktalar",  k:"data",     b:-.06},
+    {f:"planner",    t:"analyses",   l:"onaylı plan v.n",                 k:"data",     b:.05},
+    {f:"service",    t:"power",      l:"bağımsız araç · veri yok",        k:"data",     b:0},
+    {f:"analyses",   t:"results",    l:"tahmin · %95 GA · p",             k:"data",     b:.05},
+    {f:"results",    t:"visuals",    l:"şekil sözleşmesi",                k:"data",     b:-.06},
+    {f:"results",    t:"reporting",  l:"tablo + anlatı girdisi",          k:"data",     b:.08},
+    {f:"visuals",    t:"reporting",  l:"PNG + SVG",                       k:"data",     b:0},
+    {f:"reporting",  t:"docx",       l:"Results (EN/TR)",                 k:"data",     b:0},
+    {f:"service",    t:"projects",   l:"atomik autosave · sürüm",         k:"audit",    b:-.10},
+    {f:"projects",   t:"service",    l:"yeniden aç · geri yükle",         k:"audit",    b:-.10}
+  ];
+
+  var TRACE = [0,1,2,4,7,9,11,12,14,15];
+
+  var svg = document.getElementById("map");
+  var byId = {};
+  NODES.forEach(function(n){
+    n.w = Math.max(148, Math.max(n.t.length*8.4, n.s.length*5.5) + 42);
+    n.h = 50;
+    n.ph = Math.random()*Math.PI*2;
+    n.dx = 0; n.dy = 0;
+    byId[n.id] = n;
+  });
+
+  function mk(name, attrs){
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  // --- trust boundary zone ---
+  var zones = mk("g", {"class":"zone"});
+  var sn = byId.service;
+  zones.appendChild(mk("rect",{x:sn.x-sn.w/2-46, y:sn.y-88, width:sn.w+92, height:176, rx:14}));
+  var zt = mk("text",{x:sn.x-sn.w/2-46, y:sn.y-98});
+  zt.textContent = "loopback · 127.0.0.1 · oturum token'ı";
+  zones.appendChild(zt);
+  svg.appendChild(zones);
+
+  var gEdges = mk("g",{}), gPkts = mk("g",{}), gLabels = mk("g",{}), gNodes = mk("g",{});
+  svg.appendChild(gEdges); svg.appendChild(gPkts); svg.appendChild(gLabels); svg.appendChild(gNodes);
+
+  EDGES.forEach(function(e, i){
+    e.a = byId[e.f]; e.z = byId[e.t];
+    e.path = mk("path",{"class":"edge " + e.k});
+    gEdges.appendChild(e.path);
+    e.pkt = mk("circle",{r: e.k === "audit" ? 2 : 2.6, "class":"pkt " + e.k});
+    gPkts.appendChild(e.pkt);
+    e.lab = mk("g",{"class":"elabel"});
+    e.labBg = mk("rect",{rx:3, height:14});
+    e.labTx = mk("text",{"text-anchor":"middle","dominant-baseline":"middle"});
+    e.labTx.textContent = e.l;
+    e.lab.appendChild(e.labBg); e.lab.appendChild(e.labTx);
+    gLabels.appendChild(e.lab);
+    e.phase = i / EDGES.length;
+    e.len = 1;
+  });
+
+  NODES.forEach(function(n){
+    var g = mk("g",{"class":"node", tabindex:"0", role:"button",
+      "aria-label": n.t + " — " + LAYERS[n.l].name + ". " + n.d});
+    n.el = g;
+    g.appendChild(mk("rect",{"class":"body", x:-n.w/2, y:-n.h/2, width:n.w, height:n.h, rx:9}));
+    g.appendChild(mk("rect",{x:-n.w/2+1.6, y:-n.h/2+9, width:4, height:n.h-18, rx:2,
+      fill: LAYERS[n.l].color}));
+    var t1 = mk("text",{"class":"t", x:-n.w/2+18, y:-3});
+    t1.textContent = n.t;
+    var t2 = mk("text",{"class":"s", x:-n.w/2+18, y:14});
+    t2.textContent = n.s;
+    g.appendChild(t1); g.appendChild(t2);
+    g.setAttribute("style", "--nc:" + LAYERS[n.l].color);
+    gNodes.appendChild(g);
+  });
+
+  // ---------- geometry ----------
+  function cx(n){ return n.x + n.dx; }
+  function cy(n){ return n.y + n.dy; }
+
+  function clip(n, tx, ty){
+    var ax = cx(n), ay = cy(n);
+    var dx = tx - ax, dy = ty - ay;
+    if (dx === 0 && dy === 0) return [ax, ay];
+    var hw = n.w/2 + 7, hh = n.h/2 + 7;
+    var sx = dx === 0 ? Infinity : hw/Math.abs(dx);
+    var sy = dy === 0 ? Infinity : hh/Math.abs(dy);
+    var s = Math.min(sx, sy);
+    return [ax + dx*s, ay + dy*s];
+  }
+
+  function layout(t){
+    NODES.forEach(function(n){
+      if (n.drag) return;
+      if (reduce){ n.dx = 0; n.dy = 0; return; }
+      n.dx = Math.sin(t*0.00042 + n.ph) * 2.6;
+      n.dy = Math.cos(t*0.00035 + n.ph*1.7) * 2.6;
+    });
+    EDGES.forEach(function(e){
+      var mx = (cx(e.a)+cx(e.z))/2, my = (cy(e.a)+cy(e.z))/2;
+      var vx = cx(e.z)-cx(e.a), vy = cy(e.z)-cy(e.a);
+      var len = Math.sqrt(vx*vx+vy*vy) || 1;
+      var qx = mx + (-vy/len)*e.b*len, qy = my + (vx/len)*e.b*len;
+      var p1 = clip(e.a, qx, qy), p2 = clip(e.z, qx, qy);
+      e.path.setAttribute("d","M"+p1[0].toFixed(1)+" "+p1[1].toFixed(1)+
+        " Q"+qx.toFixed(1)+" "+qy.toFixed(1)+" "+p2[0].toFixed(1)+" "+p2[1].toFixed(1));
+    });
+    NODES.forEach(function(n){
+      n.el.setAttribute("transform","translate("+cx(n).toFixed(1)+","+cy(n).toFixed(1)+")");
+    });
+  }
+
+  function placeLabels(){
+    EDGES.forEach(function(e){
+      if (!e.lab.classList.contains("show")) return;
+      var p = e.path.getPointAtLength(e.len*0.5);
+      e.labTx.setAttribute("x", p.x.toFixed(1));
+      e.labTx.setAttribute("y", p.y.toFixed(1));
+      var w = e.l.length*5.4 + 12;
+      e.labBg.setAttribute("x", (p.x - w/2).toFixed(1));
+      e.labBg.setAttribute("y", (p.y - 7).toFixed(1));
+      e.labBg.setAttribute("width", w.toFixed(1));
+    });
+  }
+
+  // ---------- highlight state ----------
+  var selected = null, hovered = null, focusLayer = null, showLabels = false, tracing = false;
+  var traceEdges = null;
+
+  function focusNode(){ return selected || hovered; }
+
+  function apply(){
+    var activeE = {}, activeN = {};
+    var any = false;
+    var fn = focusNode();
+
+    if (traceEdges){
+      any = true;
+      traceEdges.forEach(function(i){
+        activeE[i] = true;
+        activeN[EDGES[i].f] = true; activeN[EDGES[i].t] = true;
+      });
+    } else if (fn){
+      any = true;
+      activeN[fn] = true;
+      EDGES.forEach(function(e, i){
+        if (e.f === fn || e.t === fn){
+          activeE[i] = true; activeN[e.f] = true; activeN[e.t] = true;
+        }
+      });
+    } else if (focusLayer){
+      any = true;
+      NODES.forEach(function(n){ if (n.l === focusLayer) activeN[n.id] = true; });
+      EDGES.forEach(function(e, i){
+        if (byId[e.f].l === focusLayer || byId[e.t].l === focusLayer) activeE[i] = true;
+      });
+    }
+
+    NODES.forEach(function(n){
+      n.el.classList.toggle("on", !!activeN[n.id]);
+      n.el.classList.toggle("dim", any && !activeN[n.id]);
+    });
+    EDGES.forEach(function(e, i){
+      var on = !!activeE[i];
+      e.path.classList.toggle("on", on);
+      e.path.classList.toggle("dim", any && !on);
+      e.pkt.classList.toggle("on", on);
+      e.pkt.classList.toggle("dim", any && !on);
+      if (on && e.k !== "boundary"){
+        e.path.setAttribute("stroke", LAYERS[byId[e.f].l].color);
+        e.pkt.setAttribute("fill", LAYERS[byId[e.f].l].color);
+      } else if (e.k !== "boundary"){
+        e.path.removeAttribute("stroke");
+        e.pkt.removeAttribute("fill");
+      }
+      e.lab.classList.toggle("show", showLabels || on || e.k === "boundary");
+    });
+    placeLabels();
+  }
+
+  // ---------- inspector ----------
+  var iName = document.getElementById("i-name"),
+      iLayer = document.getElementById("i-layer"),
+      iDesc = document.getElementById("i-desc"),
+      iIo = document.getElementById("i-io");
+
+  function inspect(id){
+    var n = byId[id];
+    if (!n){
+      iName.textContent = "Bir düğüm seçin";
+      iLayer.textContent = "Haritadaki kutulara tıklayın ya da klavyeyle gezinin.";
+      iDesc.textContent = "Seçtiğiniz bileşenin sorumluluğu, girdileri ve çıktıları burada listelenir.";
+      iIo.innerHTML = "";
+      return;
+    }
+    iName.textContent = n.t;
+    iLayer.textContent = LAYERS[n.l].name;
+    iDesc.textContent = n.d;
+    iIo.innerHTML = "";
+    EDGES.forEach(function(e){
+      if (e.f !== id && e.t !== id) return;
+      var li = document.createElement("li");
+      var ar = document.createElement("span");
+      ar.className = "ar";
+      ar.textContent = e.f === id ? "→" : "←";
+      var tx = document.createElement("span");
+      var other = e.f === id ? e.t : e.f;
+      tx.innerHTML = "<code>" + byId[other].t + "</code> · " + e.l;
+      li.appendChild(ar); li.appendChild(tx);
+      iIo.appendChild(li);
+    });
+  }
+
+  function hover(id){
+    if (tracing) return;
+    hovered = id;
+    apply();
+    inspect(focusNode());
+  }
+
+  NODES.forEach(function(n){
+    n.el.addEventListener("pointerenter", function(){ hover(n.id); });
+    n.el.addEventListener("pointerleave", function(){ hover(null); });
+    n.el.addEventListener("focus", function(){ hover(n.id); });
+    n.el.addEventListener("blur", function(){ hover(null); });
+    n.el.addEventListener("click", function(ev){
+      ev.stopPropagation();
+      if (tracing) return;
+      selected = (selected === n.id) ? null : n.id;
+      apply(); inspect(focusNode());
+    });
+    n.el.addEventListener("keydown", function(ev){
+      if (ev.key === "Enter" || ev.key === " "){
+        ev.preventDefault();
+        if (tracing) return;
+        selected = (selected === n.id) ? null : n.id;
+        apply(); inspect(focusNode());
+      }
+    });
+  });
+
+  svg.addEventListener("click", function(){
+    if (tracing) return;
+    selected = null; apply(); inspect(focusNode());
+  });
+
+  // ---------- drag ----------
+  var dragging = null, start = null;
+  function toSvg(ev){
+    var r = svg.getBoundingClientRect();
+    return {x:(ev.clientX-r.left)/r.width*1240, y:(ev.clientY-r.top)/r.height*780};
+  }
+  NODES.forEach(function(n){
+    n.el.addEventListener("pointerdown", function(ev){
+      dragging = n; n.drag = true;
+      var p = toSvg(ev);
+      start = {px:p.x, py:p.y, nx:n.x, ny:n.y};
+      n.dx = 0; n.dy = 0;
+      n.el.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    n.el.addEventListener("pointermove", function(ev){
+      if (dragging !== n) return;
+      var p = toSvg(ev);
+      n.x = start.nx + (p.x - start.px);
+      n.y = start.ny + (p.y - start.py);
+    });
+    n.el.addEventListener("pointerup", function(){ dragging = null; });
+    n.el.addEventListener("pointercancel", function(){ dragging = null; });
+  });
+
+  // ---------- toolbar ----------
+  document.getElementById("labels").addEventListener("click", function(){
+    showLabels = !showLabels;
+    this.setAttribute("aria-pressed", String(showLabels));
+    apply();
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-layer]"), function(btn){
+    btn.addEventListener("click", function(){
+      if (tracing) return;
+      var l = btn.getAttribute("data-layer");
+      focusLayer = (focusLayer === l) ? null : l;
+      selected = null; hovered = null;
+      Array.prototype.forEach.call(document.querySelectorAll("[data-layer]"), function(b){
+        b.setAttribute("aria-pressed", String(b.getAttribute("data-layer") === focusLayer));
+      });
+      apply(); inspect(null);
+    });
+  });
+  document.getElementById("reset").addEventListener("click", function(){
+    ORIG.forEach(function(o){ byId[o.id].x = o.x; byId[o.id].y = o.y; byId[o.id].drag = false; });
+    focusLayer = null; selected = null; hovered = null;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-layer]"), function(b){
+      b.setAttribute("aria-pressed","false");
+    });
+    apply(); inspect(null);
+  });
+  var ORIG = NODES.map(function(n){ return {id:n.id, x:n.x, y:n.y}; });
+
+  var playBtn = document.getElementById("play");
+  playBtn.addEventListener("click", function(){
+    if (tracing) return;
+    tracing = true; selected = null; hovered = null; focusLayer = null;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-layer]"), function(b){
+      b.setAttribute("aria-pressed","false");
+    });
+    playBtn.disabled = true;
+    playBtn.textContent = "akış çalışıyor…";
+    var i = 0;
+    traceEdges = [];
+    var step = function(){
+      if (i >= TRACE.length){
+        setTimeout(function(){
+          traceEdges = null; tracing = false;
+          playBtn.disabled = false;
+          playBtn.textContent = "▶ Uçtan uca akışı oynat";
+          apply(); inspect(null);
+        }, 1400);
+        return;
+      }
+      traceEdges.push(TRACE[i]);
+      apply();
+      inspect(EDGES[TRACE[i]].t);
+      i++;
+      setTimeout(step, reduce ? 420 : 620);
+    };
+    step();
+  });
+
+  // ---------- animation ----------
+  var frame = 0;
+  function tick(t){
+    layout(t);
+    if (frame % 20 === 0){
+      EDGES.forEach(function(e){ e.len = e.path.getTotalLength() || 1; });
+    }
+    if (!reduce){
+      EDGES.forEach(function(e){
+        var speed = e.k === "audit" ? 0.000045 : 0.00009;
+        var u = ((t*speed + e.phase) % 1);
+        var p = e.path.getPointAtLength(u * e.len);
+        e.pkt.setAttribute("cx", p.x.toFixed(1));
+        e.pkt.setAttribute("cy", p.y.toFixed(1));
+      });
+    } else {
+      EDGES.forEach(function(e){
+        var p = e.path.getPointAtLength(e.len*0.5);
+        e.pkt.setAttribute("cx", p.x.toFixed(1));
+        e.pkt.setAttribute("cy", p.y.toFixed(1));
+      });
+    }
+    placeLabels();
+    frame++;
+    requestAnimationFrame(tick);
+  }
+
+  layout(0);
+  EDGES.forEach(function(e){ e.len = e.path.getTotalLength() || 1; });
+  apply();
+  requestAnimationFrame(tick);
+
+  // screen-reader summary of the graph
+  document.getElementById("a11y-summary").textContent =
+    "Bağlantı listesi: " + EDGES.map(function(e){
+      return byId[e.f].t + " → " + byId[e.t].t + " (" + e.l + ")";
+    }).join("; ") + ".";
+
+  // ---------- pipeline rail ----------
+  var flow = document.getElementById("flow");
+  var STEPS = ["kaynak","proje","anlık görüntü","plan","iş","türetme","dışa aktarım"];
+  var x0 = 70, x1 = 1130, yy = 52;
+  var track = mk("path",{"class":"track", d:"M"+x0+" "+yy+" H"+x1});
+  flow.appendChild(track);
+  var pts = [];
+  STEPS.forEach(function(s, i){
+    var x = x0 + (x1-x0) * (i/(STEPS.length-1));
+    pts.push(x);
+    flow.appendChild(mk("circle",{"class":"stn", cx:x, cy:yy, r:15}));
+    var num = mk("text",{"class":"num", x:x, y:yy+4, "text-anchor":"middle"});
+    num.textContent = "0" + (i+1);
+    flow.appendChild(num);
+    var lab = mk("text",{"class":"lab", x:x, y:yy+38, "text-anchor":"middle"});
+    lab.textContent = s;
+    flow.appendChild(lab);
+  });
+  var pulse = mk("circle",{"class":"pulse", cx:x0, cy:yy, r:4.5});
+  flow.appendChild(pulse);
+  if (!reduce){
+    var fstart = null;
+    (function pump(ts){
+      if (fstart === null) fstart = ts;
+      var u = (((ts - fstart) / 5200) % 1);
+      pulse.setAttribute("cx", (x0 + (x1-x0)*u).toFixed(1));
+      pulse.setAttribute("opacity", (0.35 + 0.65*Math.sin(Math.PI*u)).toFixed(2));
+      requestAnimationFrame(pump);
+    })(performance.now());
+  }
+})();
+</script>
+</body>
+</html>

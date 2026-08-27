@@ -42,21 +42,14 @@ Sıra temelli yöntemler asla sessizce seçilmez: plan bunları alternatif olara
 
 ## Mimari
 
-```mermaid
-flowchart LR
-    U["Araştırmacı"] --> R["Clinical Calm React arayüzü"]
-    R --> P["Türlendirilmiş preload köprüsü"]
-    P --> E["Electron ana süreci"]
-    E -->|"Kimlik doğrulamalı loopback API<br/>geçici port"| S["Paketlenmiş Python 3.12 servisi"]
-    S --> D["Excel alımı ve değişmez proje kopyası"]
-    S --> A["Deterministik planlayıcı ve istatistik motoru"]
-    S --> V["Yayın kalitesinde şekiller"]
-    S --> W["İki dilli Word rapor üreticisi"]
-    D --> L["Yerel .biostat projesi"]
-    A --> L
-    V --> L
-    W --> L
-```
+<p align="center">
+  <img src="docs/assets/architecture.tr.svg" width="920"
+       alt="BioStat Studio mimarisi: Electron kabuğu tipli preload köprüsü üzerinden kimlik doğrulamalı loopback Python servisine bağlanır; data_intake, planner ve analyses modülleri tek bir tipli sonuç sözleşmesi üretir; visuals ve reporting bu sözleşmeden iki dilli Word raporunu türetir.">
+</p>
+
+Noktalı çizgi salt okunur kaynağı ve kalıcılık/denetim izini, kesikli terracotta çizgi ise kimlik doğrulamalı loopback sınırını geçen tek atlamayı işaretler. `power` doğrudan servise bağlıdır, çünkü içe aktarılan veriye hiç dokunmaz.
+
+> **Etkileşimli harita:** [`docs/architecture/index.html`](docs/architecture/index.html) — sürüklenebilir düğümler, modül bazlı inceleme paneli ve tekrar oynatılabilir uçtan uca akış. Dosyayı tarayıcıda açın.
 
 ### Masaüstü güvenlik sınırı
 
@@ -112,6 +105,8 @@ scripts/                      Yeniden üretilebilir ortam, paketleme ve smoke ko
 tests/fixtures/               Sentetik referans çalışma kitabı
 docs/superpowers/specs/       Onaylanmış ürün ve mimari tanımı
 docs/superpowers/plans/       Uygulama ve iyileştirme planları
+docs/architecture/            Etkileşimli mimari haritası (index.html)
+docs/assets/                  README'lerde kullanılan mimari şemaları
 ```
 
 ## Geliştirme
