@@ -2,7 +2,7 @@
 
 [English](README.md) | [Türkçe](README.tr.md)
 
-BioStat Studio is an offline-first Apple Silicon macOS application that turns a research question, an Excel dataset, and explicitly confirmed study metadata into a reproducible statistical analysis and a publication-ready Word Results section.
+BioStat Studio is an offline-first Apple Silicon macOS application that turns a research question, an optional methodology document, an Excel dataset, and explicitly human-confirmed study metadata into a reproducible statistical analysis and a publication-ready Word Results section.
 
 It is designed for biomedical researchers who want a guided workflow without sending patient or research data to a cloud service. The application runs independently of Codex and does not require Python after installation.
 
@@ -12,8 +12,8 @@ It is designed for biomedical researchers who want a guided workflow without sen
 
 BioStat Studio guides the researcher through six explicit stages:
 
-1. **Study brief** — record the research question, hypothesis, design, outcomes, exposures, covariates, and language.
-2. **Data and variables** — import an `.xlsx` workbook, inspect its structural profile, and confirm variable roles and analytical kinds.
+1. **Study brief** — record the research question, hypothesis, design, outcomes, exposures, covariates, and language. A Word, PDF, TXT, or Markdown methodology document can propose the study design with its source evidence; the proposal remains editable and unconfirmed.
+2. **Data and variables** — import an `.xlsx` workbook, inspect its structural profile, reconcile methodology concepts with dataset columns, and explicitly confirm variable roles and analytical kinds. Conflicts are surfaced above the variable list with document evidence and their real effect on the analysis plan.
 3. **Analysis plan** — review the estimand, selected method, assumptions, warnings, planned outputs, and documented alternatives.
 4. **Run and diagnose** — execute only the approved immutable plan, monitor progress, and cancel safely when needed.
 5. **Results review** — inspect estimates, 95% confidence intervals, p values, effect sizes, warnings, and provenance.
@@ -40,6 +40,8 @@ The current release executes:
 
 Rank-based methods are never selected silently: the plan documents them as alternatives, and switching to one regenerates the plan for a new explicit approval. A deterministic a-priori **power and sample-size calculator** (two-sample and paired t tests, one-way ANOVA, two proportions, correlation) is available without touching imported data. CSV/SAV import, survival analysis, mixed models, meta-analysis, causal-inference workflows, and machine learning remain roadmap items.
 
+Methodology matching is deliberately conservative and is not a calibrated prediction model. It may stay silent when evidence is ambiguous, including some Turkish verb-final covariate phrasing. Its classifications are proposals only: the application never writes `confirmed=true` until the researcher reviews and explicitly accepts or edits them.
+
 ## Architecture
 
 <p align="center">
@@ -63,7 +65,9 @@ Electron starts a bundled arm64 Python 3.12/FastAPI sidecar on `127.0.0.1` using
 
 The Python service is separated into independently tested modules:
 
+- `methodology_intake` and `extractors` — bounded local text extraction, evidence selection, and study-design proposals from DOCX, PDF, TXT, or Markdown;
 - `data_intake` — Excel loading, canonical column identities, structural profiling, and approved kinds;
+- `variable_reconciliation` — conservative methodology-to-column matching, conflict detection, and planner-impact pricing on disposable confirmed role copies;
 - `study_model` and `planner` — structured research metadata and deterministic, fail-closed analysis selection;
 - `analyses` — verified statistical implementations and common result contracts;
 - `jobs` — progress, authoritative cancellation, staged publication, and safe failure states;
@@ -75,6 +79,8 @@ The Python service is separated into independently tested modules:
 
 - Analysis is local and offline; research data do not leave the Mac.
 - Imported workbooks are copied into an immutable project snapshot and fingerprinted with SHA-256.
+- The original methodology file is not copied into the project. Extracted text, source name, format, and fingerprint are stored locally inside the `.biostat` project so later study and variable review can reuse the same evidence.
+- Raw methodology paths never reach the renderer; one-use file capabilities are consumed by the Electron main process. Machine proposals remain unconfirmed until explicit human action.
 - Raw source paths, patient rows, and free-text service errors are excluded from persisted manifests and reports.
 - Data structure and analysis plan require separate explicit approvals.
 - A changed dataset, role snapshot, study brief, or plan invalidates downstream approvals and results.
@@ -143,21 +149,20 @@ Build the standalone application and DMG with:
 npm run package:mac
 ```
 
-Generated artifacts:
+Generated artifact:
 
 ```text
-release/mac-arm64/BioStat Studio.app
 release/BioStat Studio-0.1.0-arm64.dmg
 ```
 
-The current package is ad-hoc signed and not notarized because no Apple Developer ID is configured. macOS Gatekeeper warnings are therefore expected when the build is copied to another Mac. Developer ID signing, hardened runtime, and notarization are required before general distribution.
+The current package is ad-hoc signed and not notarized because no Apple Developer ID is configured. The build runs its packaged renderer/preload checks, bundled sidecar self-test, strict code-signature verification, and DMG checksum verification before publishing the artifact. macOS Gatekeeper warnings are still expected when the build is copied to another Mac. Developer ID signing, hardened runtime, and notarization are required before general distribution.
 
 ## Current validation
 
-- Python scientific/service suite: **182 passed, 1 environment-gated skip**
-- Desktop suite: **44 passed**
+- Python scientific/service suite: **327 passed, 1 environment-gated skip**
+- Desktop suite: **76 passed**
 - TypeScript typecheck and production build: passed
-- Packaged arm64 application and bundled sidecar smoke test: passed
+- Packaged arm64 renderer/preload, bundled sidecar, strict ad-hoc signature, and DMG checksum gates: passed
 - English/Turkish DOCX numerical parity and visual render review: passed
 - English/Turkish DOCX accessibility audit: 0 high, 0 medium, 0 low findings
 
@@ -165,7 +170,7 @@ The remaining acceptance gate is an end-to-end run in the packaged application u
 
 ## Roadmap
 
-Future milestones may add broader import adapters, advanced regression and repeated-measures methods, survival analysis, power/sample-size tools, meta-analysis, and leakage-safe biomedical machine-learning pipelines. New methods will be exposed only after reference validation, edge-case tests, diagnostics, and reporting contracts are complete.
+Future milestones may add broader import adapters, advanced regression and repeated-measures methods, survival analysis, mixed models, meta-analysis, causal-inference workflows, and leakage-safe exploratory biomedical machine-learning pipelines. New methods will be exposed only after reference validation, edge-case tests, diagnostics, and reporting contracts are complete.
 
 ## License
 

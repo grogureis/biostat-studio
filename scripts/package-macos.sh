@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ANALYSIS_VENV="${BIOSTAT_ANALYSIS_VENV:-$ROOT/services/analysis/.venv-py312}"
 PYTHON="$ANALYSIS_VENV/bin/python"
+PACKAGE_OUTPUT="$(mktemp -d /private/tmp/biostat-studio-release.XXXXXX)"
+trap 'rm -rf "$PACKAGE_OUTPUT"' EXIT
 
 test "$(uname -m)" = "arm64"
 
@@ -18,6 +20,11 @@ npx tsc --project apps/desktop/tsconfig.electron.json
 bash scripts/build-preload.sh
 printf '{"type":"module"}\n' > apps/desktop/electron-dist/package.json
 bash scripts/smoke-preload-bridge.sh
-npx electron-builder --config electron-builder.yml --mac dmg dir --arm64
-bash scripts/smoke-packaged-app.sh
+npx electron-builder --config electron-builder.yml --mac dmg dir --arm64 --config.directories.output="$PACKAGE_OUTPUT"
+BIOSTAT_PACKAGED_APP="$PACKAGE_OUTPUT/mac-arm64/BioStat Studio.app" bash scripts/smoke-packaged-app.sh
+codesign --verify --deep --strict --verbose=2 "$PACKAGE_OUTPUT/mac-arm64/BioStat Studio.app"
+hdiutil verify "$PACKAGE_OUTPUT/BioStat Studio-0.1.0-arm64.dmg"
+mkdir -p release
+cp -f "$PACKAGE_OUTPUT/BioStat Studio-0.1.0-arm64.dmg" "release/BioStat Studio-0.1.0-arm64.dmg"
+cp -f "$PACKAGE_OUTPUT/BioStat Studio-0.1.0-arm64.dmg.blockmap" "release/BioStat Studio-0.1.0-arm64.dmg.blockmap"
 bash scripts/verify-package-cleanliness.sh

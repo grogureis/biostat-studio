@@ -1,7 +1,27 @@
 # STATE.md — biostat-studio
 
 **Son güncelleme:** 2026-08-27 · Codex App
-**Aktif geliştirme:** `.worktrees/methodology-intake` · `feat/methodology-matching`
+**Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio`
+
+### Metodoloji akışı ana geliştirme dalına alındı — 2026-08-27
+
+`origin/codex/biostat-studio` üzerindeki iki dokümantasyon commit'i önce yerel dala
+`544204c` ile alındı; tamamlanmış `feat/methodology-matching` dalı ardından `09a64eb`
+ile çakışmasız birleştirildi. Birleştirilmiş kaynakta taze tam kapı ölçümü:
+Python **327 geçti + 1 ortam koşullu skip**, desktop **76/76**, TypeScript typecheck,
+üretim derlemesi ve `git diff --check` temiz.
+
+İki dilli README anlatısı metodoloji belgesi alımı, kalıcı yerel metin, muhafazakâr
+değişken eşleştirme, gerçek planner etkili çelişki çözümü ve insan onayı sınırıyla
+güncellendi. Paketleme de gerçekte ad-hoc imza kullanacak ve iCloud File Provider'ın
+FinderInfo özniteliklerinden etkilenmemek için imza/DMG üretimini `/private/tmp` altında
+yapacak biçimde düzeltildi. Yeni arm64 DMG; paketli preload/renderer smoke, gömülü servis
+öz testi, katı kod imzası ve `hdiutil verify` kapılarından geçti.
+
+Teslim dosyası: `release/BioStat Studio-0.1.0-arm64.dmg` (189 MB), SHA-256
+`3e310e57aafc5ee9511406a60a394a002d4c2bb2b24c19a5cbd8f8c98bda1d4b`.
+Apple Developer ID/notarization yoktur; Gatekeeper uyarısı beklenir. Paketli uygulamada
+gerçek araştırma Excel'iyle GUI operatör kabul testi hâlâ ayrı ve açık ürün kapısıdır.
 
 ### Plan 2 tamamlandı — 2026-08-27
 

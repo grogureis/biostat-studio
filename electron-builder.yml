@@ -15,7 +15,8 @@ extraResources:
 mac:
   category: public.app-category.developer-tools
   icon: apps/desktop/build/icon.icns
-  identity: null
+  identity: "-"
+  hardenedRuntime: false
   target:
     - target: dmg
       arch:

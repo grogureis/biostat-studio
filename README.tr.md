@@ -2,7 +2,7 @@
 
 [English](README.md) | [Türkçe](README.tr.md)
 
-BioStat Studio; araştırma sorusunu, Excel veri kümesini ve açıkça onaylanmış çalışma bilgilerini yeniden üretilebilir bir istatistiksel analize ve yayına hazır Word Bulgular bölümüne dönüştüren, Apple Silicon macOS için çevrimdışı öncelikli bir uygulamadır.
+BioStat Studio; araştırma sorusunu, isteğe bağlı metodoloji belgesini, Excel veri kümesini ve insan tarafından açıkça onaylanmış çalışma bilgilerini yeniden üretilebilir bir istatistiksel analize ve yayına hazır Word Bulgular bölümüne dönüştüren, Apple Silicon macOS için çevrimdışı öncelikli bir uygulamadır.
 
 Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmiş bir iş akışı isteyen biyomedikal araştırmacılar için tasarlanmıştır. Uygulama Codex'ten bağımsız çalışır ve kurulumdan sonra ayrıca Python yüklenmesini gerektirmez.
 
@@ -12,8 +12,8 @@ Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmi�
 
 BioStat Studio araştırmacıyı altı açık aşamadan geçirir:
 
-1. **Çalışma özeti** — araştırma sorusu, hipotez, tasarım, sonuçlar, maruziyetler, kovaryatlar ve dili kaydeder.
-2. **Veri ve değişkenler** — `.xlsx` çalışma kitabını içe aktarır, yapısal profili inceler, değişken rollerini ve analitik türleri onaylatır.
+1. **Çalışma özeti** — araştırma sorusu, hipotez, tasarım, sonuçlar, maruziyetler, kovaryatlar ve dili kaydeder. Word, PDF, TXT veya Markdown metodoloji belgesi kaynak kanıtıyla çalışma tasarımı önerebilir; öneri düzenlenebilir ve onaysız kalır.
+2. **Veri ve değişkenler** — `.xlsx` çalışma kitabını içe aktarır, yapısal profili inceler, metodoloji kavramlarını veri sütunlarıyla uzlaştırır ve değişken rolleriyle analitik türleri açıkça onaylatır. Çelişkiler, belge kanıtı ve analiz planına gerçek etkileriyle değişken listesinin üzerinde gösterilir.
 3. **Analiz planı** — tahmin hedefini, seçilen yöntemi, varsayımları, uyarıları, planlanan çıktıları ve belgelenmiş alternatifleri gösterir.
 4. **Çalıştır ve tanıla** — yalnızca onaylanan değişmez planı yürütür, ilerlemeyi gösterir ve gerektiğinde güvenle iptal eder.
 5. **Sonuçları incele** — tahminleri, %95 güven aralıklarını, p değerlerini, etki büyüklüklerini, uyarıları ve analiz kökenini sunar.
@@ -40,6 +40,8 @@ Mevcut sürüm şu analizleri yürütür:
 
 Sıra temelli yöntemler asla sessizce seçilmez: plan bunları alternatif olarak belgeler ve birine geçiş, yeni bir açık onay için planı yeniden oluşturur. İçe aktarılmış veriye dokunmayan belirlenimci önsel **güç ve örneklem büyüklüğü hesaplayıcısı** (iki örneklem ve eşleştirilmiş t testleri, tek yönlü ANOVA, iki oran, korelasyon) kullanılabilir. CSV/SAV aktarımı, sağkalım analizi, karma modeller, meta-analiz, nedensel çıkarım ve makine öğrenmesi yol haritasındadır.
 
+Metodoloji eşleştirmesi bilinçli olarak muhafazakârdır ve kalibre edilmiş bir tahmin modeli değildir. Kanıt belirsiz olduğunda, bazı Türkçe fiil-sonu kovaryat ifadeleri dahil, sessiz kalabilir. Sınıflandırmaları yalnızca öneridir: araştırmacı inceleyip açıkça kabul etmeden veya düzenlemeden uygulama `confirmed=true` yazmaz.
+
 ## Mimari
 
 <p align="center">
@@ -63,7 +65,9 @@ Electron; paketlenmiş arm64 Python 3.12/FastAPI yan hizmetini `127.0.0.1` üzer
 
 Python servisi bağımsız test edilebilen modüllere ayrılır:
 
+- `methodology_intake` ve `extractors` — DOCX, PDF, TXT veya Markdown'dan sınırlı yerel metin çıkarımı, kanıt seçimi ve çalışma tasarımı önerileri;
 - `data_intake` — Excel okuma, kanonik kolon kimlikleri, yapısal profil ve onaylanan türler;
+- `variable_reconciliation` — muhafazakâr metodoloji-sütun eşleştirmesi, çelişki saptama ve tek kullanımlık onaylı rol kopyalarında planner etkisi fiyatlama;
 - `study_model` ve `planner` — yapılandırılmış araştırma bilgileri ve deterministik, kapalı-hata analiz seçimi;
 - `analyses` — doğrulanmış istatistik uygulamaları ve ortak sonuç sözleşmeleri;
 - `jobs` — ilerleme, otoritatif iptal, aşamalı yayınlama ve güvenli hata durumları;
@@ -75,6 +79,8 @@ Python servisi bağımsız test edilebilen modüllere ayrılır:
 
 - Analiz yerel ve çevrimdışıdır; araştırma verisi Mac'ten çıkmaz.
 - İçe aktarılan çalışma kitabı değişmez proje kopyasına alınır ve SHA-256 ile parmak izlenir.
+- Özgün metodoloji dosyası projeye kopyalanmaz. Çıkarılmış metin, kaynak adı, biçim ve parmak izi; sonraki çalışma ve değişken incelemelerinde aynı kanıtın kullanılabilmesi için yerel `.biostat` projesinde saklanır.
+- Ham metodoloji yolları renderer'a ulaşmaz; tek kullanımlık dosya yetkileri Electron ana sürecinde tüketilir. Makine önerileri açık insan eylemine kadar onaysız kalır.
 - Ham kaynak yolları, hasta satırları ve serbest metin servis hataları kalıcı manifestlerden ve raporlardan dışlanır.
 - Veri yapısı ve analiz planı ayrı ayrı açık onay gerektirir.
 - Veri kümesi, rol kaydı, çalışma özeti veya plan değişirse sonraki onay ve sonuçlar geçersizleşir.
@@ -143,21 +149,20 @@ Bağımsız uygulama ve DMG'yi oluşturmak için:
 npm run package:mac
 ```
 
-Üretilen dosyalar:
+Üretilen dosya:
 
 ```text
-release/mac-arm64/BioStat Studio.app
 release/BioStat Studio-0.1.0-arm64.dmg
 ```
 
-Apple Developer ID yapılandırılmadığı için mevcut paket ad-hoc imzalıdır ve notarize edilmemiştir. Paket başka bir Mac'e kopyalandığında macOS Gatekeeper uyarısı beklenir. Genel dağıtımdan önce Developer ID imzası, hardened runtime ve notarization gerekir.
+Apple Developer ID yapılandırılmadığı için mevcut paket ad-hoc imzalıdır ve notarize edilmemiştir. Dosya yayımlanmadan önce paketli renderer/preload kontrolleri, gömülü yan hizmet öz testi, katı kod imzası doğrulaması ve DMG sağlama toplamı doğrulaması çalışır. Paket başka bir Mac'e kopyalandığında yine de macOS Gatekeeper uyarısı beklenir. Genel dağıtımdan önce Developer ID imzası, hardened runtime ve notarization gerekir.
 
 ## Mevcut doğrulama
 
-- Python bilimsel/servis paketi: **182 geçti, 1 ortam koşullu atlandı**
-- Masaüstü paketi: **44 geçti**
+- Python bilimsel/servis paketi: **327 geçti, 1 ortam koşullu atlandı**
+- Masaüstü paketi: **76 geçti**
 - TypeScript tür denetimi ve üretim derlemesi: geçti
-- Paketli arm64 uygulama ve yan hizmet smoke testi: geçti
+- Paketli arm64 renderer/preload, gömülü yan hizmet, katı ad-hoc imza ve DMG sağlama toplamı kapıları: geçti
 - İngilizce/Türkçe DOCX sayısal eşdeğerliği ve görsel render incelemesi: geçti
 - İngilizce/Türkçe DOCX erişilebilirlik denetimi: 0 yüksek, 0 orta, 0 düşük bulgu
 
@@ -165,7 +170,7 @@ Kalan kabul kapısı, paketli uygulamada gerçek bir araştırma Excel'iyle uçt
 
 ## Yol haritası
 
-Sonraki aşamalarda daha geniş veri içe aktarma adaptörleri, ileri regresyon ve tekrarlı ölçüm yöntemleri, sağkalım analizi, güç/örneklem büyüklüğü araçları, meta-analiz ve veri sızıntısına dayanıklı biyomedikal makine öğrenmesi iş akışları eklenebilir. Yeni yöntemler ancak referans doğrulaması, sınır durum testleri, tanılar ve raporlama sözleşmeleri tamamlandıktan sonra arayüzde sunulacaktır.
+Sonraki aşamalarda daha geniş veri içe aktarma adaptörleri, ileri regresyon ve tekrarlı ölçüm yöntemleri, sağkalım analizi, karma modeller, meta-analiz, nedensel çıkarım iş akışları ve veri sızıntısına dayanıklı keşifsel biyomedikal makine öğrenmesi hatları eklenebilir. Yeni yöntemler ancak referans doğrulaması, sınır durum testleri, tanılar ve raporlama sözleşmeleri tamamlandıktan sonra arayüzde sunulacaktır.
 
 ## Lisans
 
