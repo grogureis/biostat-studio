@@ -156,7 +156,10 @@ export function App({ api }: { api: AnalysisApi }) {
   };
 
   const approveData = async (roles: import("./api/types").VariableRole[]) => {
-    await api.approveDataStructure({ ...project.brief, language: reportLanguage }, roles);
+    // DataIntake normally creates the project before review so it can price
+    // document/data conflicts. The API retains a creation fallback for older
+    // callers that reach approval without that preparation step.
+    await api.approveDataStructure({ ...project.brief, language: reportLanguage }, roles, project.methodology);
     // A fresh role snapshot can change the planned method; a stale override
     // would then permanently block plan generation.
     setMethodOverrides({});
@@ -208,8 +211,8 @@ export function App({ api }: { api: AnalysisApi }) {
     </aside>
     <main id="workspace" tabIndex={-1}>
       {failedOperation ? <ErrorBanner language={project.language} operation={failedOperation} detail={safeErrorDetail} onRetry={retryFailedOperation} /> : null}
-      {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} language={project.language} api={api} /> : null}
-      {project.activeStep === "data" ? <DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} onFile={changeDataFile} onApproval={approveData} language={project.language} /> : null}
+      {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} onMethodology={project.setMethodology} language={project.language} api={api} /> : null}
+      {project.activeStep === "data" ? <DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} methodology={project.methodology} onFile={changeDataFile} onApproval={approveData} language={project.language} /> : null}
       {project.activeStep === "plan" ? <PlanReview language={project.language} plan={project.plan} loading={planning} approved={project.planApproved} onApproval={(next) => void changePlanApproval(next)} onRun={() => void runAnalysis()} onAlternative={selectAlternative} /> : null}
       {project.activeStep === "power" ? <PowerPlanner api={api} language={project.language} /> : null}
       {project.activeStep === "run" ? <section className="task-card run-card" aria-labelledby="run-title"><p className="eyebrow">{text.runEyebrow}</p><h1 id="run-title">{text.stages.run}</h1>{running ? <><p role="status" aria-live="polite">{jobProgress.message ?? text.running}</p><progress aria-label={text.progress} aria-valuenow={jobProgress.progress} value={jobProgress.progress} max={100}>{jobProgress.progress}%</progress><button type="button" className="secondary-action" onClick={() => void cancel()}>{text.cancel}</button></> : cancelled ? <p role="status">{text.cancelled}</p> : <p className="loading-note">{text.ready}</p>}</section> : null}

@@ -11,10 +11,13 @@ import pytest
 
 from biostat_service.contracts import StudyBrief
 from biostat_service.data_intake import DataProfile, VariableMetadata, profile_excel
+from biostat_service.methodology_intake import MethodologyDocument
 from biostat_service.projects import (
     append_audit_event,
+    attach_methodology,
     create_project,
     load_project,
+    read_methodology,
     save_project_state,
 )
 
@@ -422,3 +425,41 @@ def test_project_manifest_encodes_tuple_source_labels_without_losing_type(
         "type": "tuple",
         "items": ["visit", 2],
     }
+
+
+def _document(text: str = "Yöntem\nRetrospektif kohort çalışması.") -> MethodologyDocument:
+    return MethodologyDocument(
+        source_sha256="a" * 64,
+        source_format="docx",
+        text=text,
+        char_count=len(text),
+        truncated=False,
+        warnings=(),
+    )
+
+
+def test_attached_methodology_survives_a_reload(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "data.xlsx", ["group", "outcome"])
+    project = create_project(tmp_path / "study.biostat", brief, profile_excel(source))
+
+    attach_methodology(project, _document(), "yontem.docx")
+
+    reloaded, manifest = load_project(project.root)
+    record = read_methodology(reloaded)
+    assert record is not None
+    assert record.text == "Yöntem\nRetrospektif kohort çalışması."
+    assert record.original_name == "yontem.docx"
+    assert record.source_format == "docx"
+    assert manifest["methodology"]["relative_path"] == "source/methodology.txt"
+    assert manifest["schema_version"] == 2
+
+
+def test_a_project_without_a_document_reads_as_none(
+    tmp_path: Path, brief: StudyBrief
+) -> None:
+    source = _source_workbook(tmp_path / "data.xlsx", ["group", "outcome"])
+    project = create_project(tmp_path / "study.biostat", brief, profile_excel(source))
+
+    assert read_methodology(project) is None

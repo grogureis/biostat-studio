@@ -1,7 +1,29 @@
 # STATE.md — biostat-studio
 
-**Son güncelleme:** 2026-08-24 · oturum `biostat-studio-app-8c`
-**Dal:** `codex/biostat-studio` · `feat/methodology-intake` **BİRLEŞTİRİLDİ** (`9c9f624`, `--no-ff`)
+**Son güncelleme:** 2026-08-27 · Codex App
+**Aktif geliştirme:** `.worktrees/methodology-intake` · `feat/methodology-matching`
+
+### Plan 2 tamamlandı — 2026-08-27
+
+Metodoloji eşleştirme planının 10/10 görevi tamamlandı. Task 10 commit'i `c6ec726`:
+çelişkili değişkenler listenin üstünde kanıt ve gerçek planner maliyetiyle
+gösteriliyor; metot kimlikleri ortak EN/TR etiket yardımcısından geçiyor; insan
+veri/doküman sınıflandırmasını açıkça seçiyor. Dokümandan gelen tasarım rozeti ve
+kanıtı, kullanıcı alanı düzenlediğinde düşüyor.
+
+RED ölçümü 19/21 geçer ve iki beklenen kırık; GREEN/tam kapı ölçümü Python
+327 geçti + 1 skip, desktop 76/76, typecheck ve diff kontrolü temiz. Final dal taraması
+bir mevcut terminal-durum/audit yarışı yakaladı: istemci `cancelled` durumunu kalıcı
+audit callback'i bitmeden görebiliyordu. Deterministik RED testle doğrulandı ve `92e8a52`
+ile terminal durum callback sonrasına alındı; yeni açık Critical/Important bulgu yok.
+Plan 3'e devredilen iki ölçülmüş sınır açık:
+kalibre edilmemiş/dar kavram-sütun eşleştirme ve Türkçe fiil-sonu kovaryat cümlelerinde
+kural motorunun bilinçli sessizliği. Paketli uygulamada gerçek Excel ile GUI operatör kabul
+testi de ayrı bir ürün kapısı olarak açık.
+
+---
+
+### Önceki birleştirme kaydı — 2026-08-24
 
 ### BİRLEŞTİRME YAPILDI — 2026-08-24, Erdem'in kararı
 22 commit `codex/biostat-studio`'ya girdi. **Push edilmedi.** `origin` hâlâ 2 docs-only commit
@@ -355,15 +377,73 @@ raporlandı, `8f` tarafından git ile doğrulanıp yazıldı. 1b Task 8'i uygula
 
 ## Sıradaki iş
 
-**1. `feat/methodology-intake` dalının birleştirme kararı — Erdem'in kararı, verilmedi.**
-Kod hazır, inceleme temiz (344 test, typecheck temiz, çalışma ağacı temiz).
-Sıralama önerisi: **önce Task 8'in operatör kabul testi** (madde 4) koşulsun, sonra bu dal
-birleşsin. Gerekçe: kabul testi gerçek bir `.xlsx` ile uçtan uca akışı sınıyor; bu dal o akışın
-girişine yeni bir adım ekliyor. Kabul testi zaten bir kez importta patlamıştı (`01ad68a`).
+**⏸️ Codex App'e devir teslim — 2026-08-27.** Plan 2 çalıştırması **9/10 task**.
+Task 9 `4565c4e` ile commitli; Task 10 test-first RED noktasında duruyor.
 
-**2. Plan 2'yi ÇALIŞTIR** — plan yazıldı (madde 1), kodlanmadı. Erdem'in vermediği tek karar:
-**subagent-driven mı, inline mı?** Plan 1'in ölçülmüş dersi (aşağıdaki kişisel not) subagent
-+ **zorunlu final dal incelemesi** diyor; sekiz task incelemesi iki kusuru kaçırmıştı.
+**Dönüşte ilk iş — Task 10 GREEN:** çalışma ağacında yalnızca iki test dosyası değişik:
+`apps/desktop/src/features/data/DataIntake.test.tsx` ve
+`apps/desktop/src/features/study/StudyBrief.test.tsx`. Yeni iki test beklenen nedenle kırık:
+conflict paneli henüz render edilmiyor; kullanıcı önerilmiş tasarımı değiştirince doküman rozeti
+henüz düşmüyor. Hedefli sonuç **21 test: 19 geçti, 2 RED**. Üretim koduna Task 10 için henüz
+dokunulmadı.
+
+Uygulama sırası: ortak method-label yardımcısı oluştur ve hem `PlanReview` hem `DataIntake`te
+kullan; conflict bloğunu değişken listesinin üstüne kanıt, veri/belge türü, planner maliyeti ve iki
+seçim düğmesiyle koy; sonra `StudyBrief`te `fromDocument` alan setini tutup insan düzenlemesinde
+rozet ile kanıtı düşür. Ardından hedefli test → desktop tam paket → typecheck → Python tam paket →
+`git diff --check`; Task 10 commitinden sonra bütün-dal incelemesi.
+
+Dal: `feat/methodology-matching` (worktree `.worktrees/methodology-intake`; worktree adı eski
+dalın adını taşıyor, **dal adına bakın**). Base `1be5ebe`.
+Yöntem: subagent-driven, her task'tan sonra inceleme, sonda **zorunlu** tam dal incelemesi
+(Erdem'in kararı). Uygulayan ile denetleyen ayrı — Plan 1'in ölçülmüş dersi.
+Ledger — **tek doğru kaynak**: `.superpowers/sdd/2026-08-24-metodoloji-eslestirme-plan2/progress.md`
+(git-ignored; `git clean -fdx` onu siler, o zaman `git log`'dan kurtarın).
+Son temiz Task 9 kapısı: **326 Python + 1 skip** (Task 8 sonrası), **74/74 desktop**, typecheck ve
+`git diff --check` temiz. Son commit `4565c4e`; çalışma ağacındaki iki dosya kasıtlı RED testlerdir.
+
+| Task | Durum |
+|---|---|
+| 1 — Belgenin evi (`projects.py`) | ✅ complete (`1be5ebe..268f3ca`), 1 fix turu |
+| 2 — Servis yüzeyi (`app.py`) | ✅ complete (`268f3ca..6e5b1d1`), 1 fix turu, 285 passed |
+| 3 — Renderer köprüsü | ✅ complete (`6e5b1d1..066be79`), 1 fix turu (ruling), 70/70 desktop |
+| 4 — Eşleştirme sözleşmesi | ✅ complete (`066be79..a12d332`), fix turu gerekmedi, 287 passed |
+| 5 — Kavram çıkarımı (`rule.py`) | ✅ complete (`a12d332..b92a292`, 304 passed), 5 fix turu |
+| 6 — Değişken eşleştirme | ✅ complete (`6323241`, 314 passed) |
+| 7 — Veri/doküman çelişkisi | ✅ complete (`a0c836f`, 323 passed + 1 skip) |
+| 8 — Planner ile maliyetleme | ✅ complete (`f6bcf84`, 326 passed + 1 skip; desktop 71/71) |
+| 9 — İnsan onayı semantiği | ✅ complete (`4565c4e`, desktop 74/74 + typecheck) |
+| 10 — Conflict ekranı + rozet düşürme | 🔴 RED testleri yazıldı; üretim kodu bekliyor |
+
+### (eski kayıt — tarihsel) Task 5'in başlangıçtaki kusur analizi
+
+**Brief'in verdiği `_concepts` kodu kendi testini geçmiyor.** Sebep Türkçe'nin fiil-sonu yapısı:
+*"Modeller yaş, cinsiyet ve VKİ **için düzeltildi**"* — kalıp (`düzeltildi`) cümlenin **sonunda**,
+kavramlar ise **öncesinde**. Planın ileriye-bakan kuyruk araması bu cümlede yapısal olarak boş
+döner. İngilizce (`adjusted for X, Y, Z`) ileriye bakar, Türkçe geriye — plan bunu görmemiş.
+
+Implementer'ın çözümü: geriye-doğru span ayrıştırma + cümlenin **öznesini** dışlayan dar, kapalı
+bir stopword listesi (`_ADJUSTMENT_SUBJECT`). Ayrıca brief'in hiç kullanılmayan `_CONNECTORS`
+regex'ini atmış ve `_design`'ın zaten yaptığı `original_text` evidence-offset remap'ini eklemiş
+(brief bunu atlamıştı).
+
+**İncelemede özellikle denetlenecek üç şey:**
+1. **Kalıplar fazla geniş mi?** Plan 1'in ölçülmüş kusuru, geniş kalıbın *başka bir çalışmadan
+   yapılan alıntıyı* makalenin kendi beyanı sanmasıydı.
+   `test_a_sentence_without_a_concept_pattern_yields_nothing` bunun bekçisi.
+2. **Geriye-doğru ayrıştırma + stopword listesi ölçülmemiş bir genellemedir** ve implementer bunu
+   açıkça böyle işaretledi (doğru davranış). Tek bir test cümlesinden genelleme yapıldı; inceleme
+   bu genellemenin nerede yanlış eşleşeceğini aramalı.
+3. **Çıkarım kalitesi ölçülmedi ve bu planda ölçülemez** (gold set Plan 3'te). Kodda, yorumda veya
+   raporda ölçülmemiş doğruluk iddiası varsa bulgu sayılır.
+
+**2. Merge sonrası hâlâ açık:** operatör GUI kabul testi (madde 4/3) koşulmadı.
+
+**2b. Task 6 dispatch'ine taşınacak ertelenmiş bulgu:** `extractors/contracts.py:114`
+`column_summaries` docstring'i `sorted()`'ın **determinizm** gerekçesini taşımıyor. Dict'ler zaten
+ekleme sırasını koruduğu için ileride biri sortu "sadeleştirip" silebilir ve eşitlik bozucu sıra
+sessizce kırılır → aynı girdi farklı plan digest'i verebilir. (Task 5 dispatch'ine de eklendi;
+Task 5 raporu bunu yaptığını söylüyorsa inceleme teyit etsin, yoksa Task 6'ya taşıyın.)
 
 **3. Plan 3'ü yaz** (spec §7-§8): blocking sözlüğü + gold set + ölçüm + `LocalExtractor`.
 Motor seçimi **ölçümsüz yapılmayacak**. Ollama kurulu ve ayakta, **yüklü model yok**

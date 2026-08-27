@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { DataIntake } from "./DataIntake";
+import type { AnalysisApi } from "../../api/client";
 
 afterEach(cleanup);
 
@@ -55,6 +56,8 @@ it("invokes the explicit data approval action and presents its confirmed state",
   />);
 
   await user.click(screen.getByRole("button", { name: "Import Excel" }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Role for Group" }), "exposure");
+  await user.selectOptions(screen.getByRole("combobox", { name: "Role for Outcome" }), "outcome");
   await user.click(await screen.findByRole("button", { name: "Approve data structure" }));
   expect(onApproval).toHaveBeenCalledOnce();
 
@@ -67,6 +70,101 @@ it("invokes the explicit data approval action and presents its confirmed state",
     onApproval={onApproval}
   />);
   expect(screen.getByRole("button", { name: "Data structure approved" })).toBeDisabled();
+});
+
+it("does not treat inferred variable roles as human-confirmed", async () => {
+  const user = userEvent.setup();
+  const onApproval = vi.fn().mockResolvedValue(undefined);
+  render(<DataIntake
+    api={{
+      selectDataFile: vi.fn().mockResolvedValue("study.xlsx"), profileData: vi.fn().mockResolvedValue(profile), approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(),
+      runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+    }}
+    dataFile={null}
+    approved={false}
+    language="en"
+    onFile={vi.fn()}
+    onApproval={onApproval}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Import Excel" }));
+
+  expect(await screen.findByRole("button", { name: "Approve data structure" })).toBeDisabled();
+  expect(onApproval).not.toHaveBeenCalled();
+});
+
+it("bulk-accepts only clear variables and leaves conflicts unconfirmed", async () => {
+  const user = userEvent.setup();
+  const onApproval = vi.fn().mockResolvedValue(undefined);
+  const api = {
+    selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+    profileData: vi.fn().mockResolvedValue(profile),
+    prepareDataStructure: vi.fn().mockResolvedValue({
+      proposals: [
+        { column: "group", role: null, kind: { value: "binary", confidence: 0.7, evidence: null, evidence_offset: null, source: "rule" } },
+      ],
+      conflicts: [{ column: "group", data_kind: "binary", document_kind: "categorical", evidence: "Group classification", evidence_offset: 0, methods_if_document: [], methods_if_data: [], blocked_if_document: [], blocked_if_data: [] }],
+    }),
+    approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+  } as unknown as AnalysisApi;
+  render(<DataIntake
+    api={api}
+    dataFile={null}
+    approved={false}
+    language="en"
+    brief={{ title: "Study", question: "Is group associated with outcome?", hypothesis: "Yes", design: "cohort", outcome_variables: ["outcome"], exposure_variables: ["group"] }}
+    onFile={vi.fn()}
+    onApproval={onApproval}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Import Excel" }));
+  await user.click(await screen.findByRole("button", { name: "Accept remaining clear variables" }));
+
+  expect(screen.getByRole("button", { name: "Approve data structure" })).toBeDisabled();
+  await user.selectOptions(screen.getByRole("combobox", { name: "Role for Group" }), "exposure");
+  await user.click(screen.getByRole("button", { name: "Approve data structure" }));
+  const submitted = onApproval.mock.calls.at(-1)?.[0] ?? [];
+  expect(submitted.find((role: { name: string }) => role.name === "group")?.confirmed).toBe(true);
+  expect(submitted.find((role: { name: string }) => role.name === "outcome")?.confirmed).toBe(true);
+});
+
+it("shows each conflict's evidence and planner cost before the variable list", async () => {
+  const user = userEvent.setup();
+  const api = {
+    selectDataFile: vi.fn().mockResolvedValue("study.xlsx"),
+    profileData: vi.fn().mockResolvedValue(profile),
+    prepareDataStructure: vi.fn().mockResolvedValue({
+      proposals: [],
+      conflicts: [{
+        column: "group", data_kind: "continuous", document_kind: "categorical",
+        evidence: "Patients were classified by TNM stage I-IV.", evidence_offset: 120,
+        methods_if_document: ["welch_anova"], methods_if_data: ["pearson_or_spearman"],
+        blocked_if_document: [], blocked_if_data: [],
+      }],
+    }),
+    approveDataStructure: vi.fn(), createPlan: vi.fn(), approvePlan: vi.fn(), runAnalysis: vi.fn(), cancelAnalysis: vi.fn(), invalidateProject: vi.fn(), exportReport: vi.fn(), computePower: vi.fn(),
+  } as unknown as AnalysisApi;
+
+  render(<DataIntake
+    api={api}
+    dataFile={null}
+    approved={false}
+    language="en"
+    brief={{ title: "Study", question: "Question", hypothesis: "Hypothesis", design: "cohort", outcome_variables: ["outcome"], exposure_variables: ["group"] }}
+    onFile={vi.fn()}
+    onApproval={vi.fn()}
+  />);
+
+  await user.click(screen.getByRole("button", { name: "Import Excel" }));
+
+  const conflict = await screen.findByRole("group", { name: "Conflict for Group" });
+  expect(conflict).toHaveTextContent("Patients were classified by TNM stage I-IV.");
+  expect(conflict).toHaveTextContent("Welch ANOVA");
+  expect(conflict).toHaveTextContent("Pearson or Spearman correlation");
+  expect(conflict).not.toHaveTextContent("welch_anova");
+  expect(screen.getByRole("button", { name: "Use document classification for Group" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Use data classification for Group" })).toBeEnabled();
+  expect(conflict.compareDocumentPosition(screen.getByRole("heading", { name: "Group" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it("localizes structural metadata and editable role options in Turkish", async () => {
@@ -107,6 +205,8 @@ it("shows a safe approval failure without exposing service details", async () =>
   />);
 
   await user.click(screen.getByRole("button", { name: "Import Excel" }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Role for Group" }), "exposure");
+  await user.selectOptions(screen.getByRole("combobox", { name: "Role for Outcome" }), "outcome");
   await user.click(await screen.findByRole("button", { name: "Approve data structure" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Data structure approval could not be completed");
   expect(screen.queryByText("/private/patient-001.xlsx")).not.toBeInTheDocument();

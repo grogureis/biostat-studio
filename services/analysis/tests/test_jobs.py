@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from threading import Event
+from threading import Event, Thread
 from time import sleep
 
 import pytest
@@ -202,4 +202,37 @@ def test_late_cancellation_cleans_staging_without_publishing_side_effects() -> N
     assert final.result is None
     assert published == []
     assert cleaned == ["staging"]
+    manager.shutdown()
+
+
+def test_terminal_state_is_not_public_until_terminal_callback_finishes() -> None:
+    """A public terminal state means its durable callback side effects are done."""
+    manager = JobManager(max_workers=1)
+    callback_started = Event()
+    release_callback = Event()
+    read_finished = Event()
+    observed = []
+
+    def record_terminal(_state):
+        callback_started.set()
+        release_callback.wait(timeout=1)
+
+    job = manager.submit(
+        lambda _is_cancelled, _update_progress: {"completed": True},
+        on_terminal=record_terminal,
+    )
+    assert callback_started.wait(timeout=1)
+
+    def read_public_state() -> None:
+        observed.append(manager.get(job.id))
+        read_finished.set()
+
+    reader = Thread(target=read_public_state)
+    reader.start()
+    assert not read_finished.wait(timeout=0.05)
+    release_callback.set()
+    assert read_finished.wait(timeout=1)
+    reader.join(timeout=1)
+
+    assert observed[0].status == "completed"
     manager.shutdown()

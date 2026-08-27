@@ -1,7 +1,10 @@
+import dataclasses
+
 import pytest
 from pydantic import ValidationError
 
 from biostat_service.contracts import AnalysisResult, StudyBrief
+from biostat_service.extractors.contracts import ColumnSummary, RoleProposal, Proposal
 
 
 def test_study_brief_requires_one_outcome():
@@ -82,3 +85,20 @@ def test_analysis_result_rejects_missing_provenance():
         )
 
     assert "provenance" in str(exc_info.value)
+
+
+# Tests for extractors contract (Task 4)
+def test_column_summary_carries_no_cell_values() -> None:
+    """Privacy is a type signature, not a policy (spec §5)."""
+    fields = {field.name for field in dataclasses.fields(ColumnSummary)}
+    assert fields == {"name", "kind", "unique_values", "non_missing"}
+
+
+def test_role_proposal_may_carry_a_kind_correction_alone() -> None:
+    proposal = RoleProposal(
+        column="evre",
+        role=None,
+        kind=Proposal(value="categorical", confidence=0.7, source="rule"),
+    )
+    assert proposal.role is None
+    assert proposal.kind is not None and proposal.kind.value == "categorical"

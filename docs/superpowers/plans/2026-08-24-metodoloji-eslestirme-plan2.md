@@ -1494,7 +1494,7 @@ Spec §6 "Ekranlar": çelişkili ve düşük güvenli değişkenler listenin **�
 **Interfaces:**
 - Consumes: Task 8 yükü, Task 9 `confirmed` semantiği
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```tsx
 // DataIntake.test.tsx
@@ -1530,12 +1530,12 @@ it("drops the from-document badge once the user edits the field", async () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `npm run test:desktop`
 Expected: FAIL — çelişki bloğu ve rozet düşme kuralı yok
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Çelişki bloğu, değişken listesinin **üstünde**, `role="group"` ile ve spec §6'daki metin düzeninde: veri ne diyor · belge ne diyor (kanıt cümlesi) · öneri · **bu seçim analizi değiştirir** satırı · iki düğme. `blocked_if_*` boş değilse o seçenek "bu seçim analizi engelliyor" olarak işaretlenir ve engel kodu gösterilir.
 
@@ -1543,12 +1543,12 @@ Metot adları kullanıcıya ham `method` kimliğiyle gösterilmez; `PlanReview.t
 
 Rozet düşme kuralı (spec §6): `StudyBrief.tsx` her alan için `fromDocument: Set<keyof StudyBriefDto>` tutar; `update(key, ...)` çağrıldığında `key` bu kümeden çıkarılır. `.proposal-badge` yalnızca `fromDocument.has(key) && proposal.evidence` iken render edilir — STATE.md 0b'deki "`design` doğruyken `evidence` null olsa da rozet render ediliyor" borcu **burada kapanır**.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `npm run test:desktop && npm run typecheck --workspace apps/desktop`
 Expected: PASS
 
-- [ ] **Step 5: Tam kapı seti**
+- [x] **Step 5: Tam kapı seti**
 
 ```bash
 PYTHONPATH=services/analysis services/analysis/.venv-py312/bin/python -m pytest services/analysis/tests -q
@@ -1557,7 +1557,7 @@ npm run typecheck --workspace apps/desktop
 git diff --check
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop

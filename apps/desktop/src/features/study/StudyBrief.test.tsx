@@ -38,8 +38,10 @@ function makeApi(overrides: Partial<AnalysisApi> = {}): AnalysisApi {
     extractMethodology: vi.fn(async (): Promise<MethodologyExtraction> => ({
       source_sha256: "a".repeat(64),
       source_format: "docx",
+      original_name: "protokol.docx",
       char_count: 100,
       truncated: false,
+      text: "Yöntem\nRetrospektif kohort çalışması.",
       warnings: [],
       brief: {
         title: null,
@@ -183,8 +185,10 @@ it("warns when the document was truncated", async () => {
     extractMethodology: vi.fn(async (): Promise<MethodologyExtraction> => ({
       source_sha256: "a".repeat(64),
       source_format: "txt",
+      original_name: "uzun-protokol.txt",
       char_count: 200000,
       truncated: true,
+      text: "a".repeat(200000),
       warnings: ["document_truncated"],
       brief: {
         title: null, question: null, hypothesis: null, design: null,
@@ -205,8 +209,10 @@ it("warns when no methods section was found, reading the merged top-level warnin
     extractMethodology: vi.fn(async (): Promise<MethodologyExtraction> => ({
       source_sha256: "a".repeat(64),
       source_format: "txt",
+      original_name: "protokol.txt",
       char_count: 500,
       truncated: false,
+      text: "Giriş\nKesitsel çalışma.",
       warnings: ["no_method_section"],
       brief: {
         title: null, question: null, hypothesis: null, design: null,
@@ -251,8 +257,10 @@ function deferred<T>() {
 const cohortExtraction: MethodologyExtraction = {
   source_sha256: "a".repeat(64),
   source_format: "docx",
+  original_name: "protokol.docx",
   char_count: 100,
   truncated: false,
+  text: "Yöntem\nRetrospektif kohort çalışması.",
   warnings: [],
   brief: {
     title: null,
@@ -285,6 +293,19 @@ function Harness({ api }: { api: AnalysisApi }) {
     </>
   );
 }
+
+it("drops the from-document badge once the user edits the proposed field", async () => {
+  const user = userEvent.setup();
+  render(<Harness api={makeApi()} />);
+
+  await user.click(screen.getByRole("button", { name: /metodoloji dokümanı/i }));
+  expect(await screen.findByText("dokümandan")).toBeInTheDocument();
+
+  await user.selectOptions(screen.getByLabelText(/çalışma tasarımı/i), "trial");
+
+  expect(screen.queryByText("dokümandan")).not.toBeInTheDocument();
+  expect(screen.queryByText("Retrospektif kohort çalışması.")).not.toBeInTheDocument();
+});
 
 it("keeps a brief field that changed while the extraction was still in flight", async () => {
   const user = userEvent.setup();
@@ -344,4 +365,39 @@ it("labels the in-progress import in English too", async () => {
 
   pending.resolve(cohortExtraction);
   await waitFor(() => expect(screen.getByRole("button", { name: /import methodology document/i })).toBeEnabled());
+});
+
+// --- Task 3: the project does not exist yet when the document is extracted
+// (it is only created later, when the Excel workbook arrives), so the
+// extracted text has nowhere to live except the renderer. StudyBrief keeps
+// its local `extraction` state for the proposal badges, but must ALSO report
+// the full extraction upward so App.tsx/store.ts can carry it forward to
+// project creation.
+
+it("lifts the extracted document out of the component", async () => {
+  const onMethodology = vi.fn();
+  const api = {
+    selectMethodologyDocument: async () => "yontem.docx",
+    extractMethodology: async () => ({
+      source_sha256: "a".repeat(64),
+      source_format: "docx",
+      original_name: "yontem.docx",
+      char_count: 24,
+      truncated: false,
+      text: "Yöntem\nKesitsel çalışma.",
+      warnings: [],
+      brief: { title: null, question: null, hypothesis: null, design: null, outcome_concepts: [], exposure_concepts: [], covariate_concepts: [], warnings: [] },
+    }),
+  };
+
+  render(<StudyBrief value={emptyBrief} onChange={vi.fn()} onMethodology={onMethodology} language="tr" api={api as never} />);
+  // The brief's snippet matched the button by /belge/i, but the TR label is
+  // "Metodoloji dokümanı yükle" — no "belge" substring exists anywhere in
+  // this component's copy. Matched the same way every other test in this
+  // file locates the import button.
+  await userEvent.click(screen.getByRole("button", { name: /metodoloji dokümanı/i }));
+
+  await waitFor(() => expect(onMethodology).toHaveBeenCalledWith(
+    expect.objectContaining({ text: "Yöntem\nKesitsel çalışma.", original_name: "yontem.docx" }),
+  ));
 });

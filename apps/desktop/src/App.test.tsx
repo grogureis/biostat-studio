@@ -102,6 +102,7 @@ async function openApprovedDataPlan(
 ) {
   await user.click(screen.getByRole("button", { name: language === "en" ? "Data & variables" : "Veri ve değişkenler" }));
   await user.click(screen.getByRole("button", { name: language === "en" ? "Import Excel" : "Excel içe aktar" }));
+  await user.click(await screen.findByRole("button", { name: language === "en" ? "Accept remaining clear variables" : "Kalan uygun değişkenleri kabul et" }));
   await user.click(await screen.findByRole("button", { name: language === "en" ? "Approve data structure" : "Veri yapısını onayla" }));
   await waitFor(() => expect(screen.getByRole("button", { name: language === "en" ? "Data structure approved" : "Veri yapısı onaylandı" })).toBeDisabled());
   await user.click(screen.getByRole("button", { name: language === "en" ? "Analysis plan" : "Analiz planı" }));
@@ -458,7 +459,8 @@ describe("Clinical Calm workflow", () => {
     await user.click(screen.getByRole("button", { name: "Data & variables" }));
     await user.click(screen.getByRole("button", { name: "Import Excel" }));
 
-    expect(screen.getByRole("button", { name: "Approve data structure" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Approve data structure" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Accept remaining clear variables" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Analysis plan" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Results review" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Word report" })).toBeDisabled();

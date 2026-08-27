@@ -142,6 +142,29 @@ export interface ProposalDto {
   source: string;
 }
 
+export interface RoleProposalDto {
+  column: string;
+  role: ProposalDto | null;
+  kind: ProposalDto | null;
+}
+
+export interface ConflictDto {
+  column: string;
+  data_kind: string;
+  document_kind: string;
+  evidence: string | null;
+  evidence_offset: number | null;
+  methods_if_document: string[];
+  methods_if_data: string[];
+  blocked_if_document: string[];
+  blocked_if_data: string[];
+}
+
+export interface VariableProposalResponse {
+  proposals: RoleProposalDto[];
+  conflicts: ConflictDto[];
+}
+
 /** Mirrors BriefProposal in services/analysis/biostat_service/extractors/contracts.py — all eight fields. */
 export interface BriefProposalDto {
   title: ProposalDto | null;
@@ -157,8 +180,17 @@ export interface BriefProposalDto {
 export interface MethodologyExtraction {
   source_sha256: string;
   source_format: string;
+  /** The bare filename only — never a path. See api-proxy.ts's renderer-path ban. */
+  original_name: string;
   char_count: number;
   truncated: boolean;
+  /**
+   * The full extracted document text. The project that will own this text
+   * does not exist yet when extraction happens (it is only created once the
+   * Excel workbook arrives), so the renderer carries it in the meantime —
+   * see store.ts's `methodology` field.
+   */
+  text: string;
   warnings: string[];
   brief: BriefProposalDto;
 }

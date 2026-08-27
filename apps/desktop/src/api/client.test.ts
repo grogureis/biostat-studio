@@ -90,6 +90,35 @@ describe("authenticated loopback API client", () => {
     expect(progress).toHaveBeenCalledWith(expect.objectContaining({ progress: 45, message: "Running approved methods." }));
   });
 
+  it("prepares the project before data approval so variable proposals are reviewable", async () => {
+    const requestApi = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { id: "project-1", profile: { rows: 12 } } })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { proposals: [], conflicts: [] } })
+      .mockResolvedValueOnce({ ok: true, status: 200, body: { approved: true } });
+    const api = createAnalysisApi({
+      selectDataFile: vi.fn().mockResolvedValue({ displayName: "study.xlsx", profileCapability: "profile-cap", importCapability: "import-cap" }),
+      selectMethodologyDocument: vi.fn(),
+      selectProject: vi.fn().mockResolvedValue({ id: "create-cap", displayName: "study.biostat" }),
+      selectReportDestination: vi.fn(),
+      requestApi,
+    });
+
+    await api.selectDataFile();
+    const preparing = api as typeof api & { prepareDataStructure(brief: StudyBrief): Promise<{ proposals: unknown[]; conflicts: unknown[] }> };
+    await expect(preparing.prepareDataStructure(brief)).resolves.toEqual({ proposals: [], conflicts: [] });
+    await api.approveDataStructure(brief, []);
+
+    expect(requestApi.mock.calls.map(([request]) => request.path)).toEqual([
+      "/v1/projects",
+      "/v1/projects/project-1/variable-proposals",
+      "/v1/projects/project-1/data-approval",
+    ]);
+    expect(requestApi.mock.calls[0][0].body).toMatchObject({
+      source_capability: "import-cap",
+      project_capability: "create-cap",
+    });
+  });
+
   it("computes power statelessly and sends plan method overrides", async () => {
     const requestApi = vi.fn()
       .mockResolvedValueOnce({ ok: true, status: 200, body: { analysis: "two_sample_t", per_group_rounded: 64 } })
