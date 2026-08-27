@@ -37,6 +37,11 @@ const labels = {
     acceptRemaining: "Accept remaining clear variables",
     reviewRequired: "This methodology suggestion requires your review before approval.",
     confirmSuggestion: "Confirm suggestion for",
+    pendingTitle: "Review before approval",
+    pendingSingular: "variable still needs your confirmation.",
+    pendingPlural: "variables still need your confirmation.",
+    proposedClassification: "Proposed classification",
+    resolveConflict: "Resolve the document and data conflict in the review card above.",
     conflict: "Conflict for",
     conflictTitle: "Document and data disagree",
     dataSays: "Data classification",
@@ -74,6 +79,11 @@ const labels = {
     acceptRemaining: "Kalan uygun değişkenleri kabul et",
     reviewRequired: "Bu metodoloji önerisi onaydan önce incelemenizi gerektiriyor.",
     confirmSuggestion: "Öneriyi onayla",
+    pendingTitle: "Onaydan önce inceleyin",
+    pendingSingular: "değişken hâlâ onayınızı bekliyor.",
+    pendingPlural: "değişken hâlâ onayınızı bekliyor.",
+    proposedClassification: "Önerilen sınıflandırma",
+    resolveConflict: "Yukarıdaki inceleme kartında doküman ve veri çelişkisini çözün.",
     conflict: "Çelişki",
     conflictTitle: "Doküman ve veri uyuşmuyor",
     dataSays: "Veri sınıflandırması",
@@ -293,6 +303,10 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
     && !conflictColumns.has(name)
     && proposalConfidence(proposalsByColumn.get(name)) >= LOW_CONFIDENCE
   ));
+  const pendingReview = Object.entries(roles).filter(([name, role]) => (
+    !role.confirmed
+    && (conflictColumns.has(name) || proposalConfidence(proposalsByColumn.get(name)) < LOW_CONFIDENCE)
+  ));
 
   return (
     <section className="task-card" aria-labelledby="data-title" aria-busy={importing}>
@@ -337,6 +351,29 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
           </article>;
         })}
         {profile.warnings.length ? <div className="warning-line"><strong>{copy.warnings}</strong><ul>{profile.warnings.map((warning) => <li key={`${warning.code}:${warning.column ?? "all"}`}>{warning.message}</li>)}</ul></div> : null}
+      </section> : null}
+      {profile && preparationReady && !hasBulkAcceptableRole && pendingReview.length > 0 ? <section className="pending-review" aria-labelledby="pending-review-title">
+        <h2 id="pending-review-title">{copy.pendingTitle}</h2>
+        <p><strong>{pendingReview.length}</strong> {pendingReview.length === 1 ? copy.pendingSingular : copy.pendingPlural}</p>
+        <div className="pending-review-list">
+          {pendingReview.map(([name, role]) => {
+            const variable = profile.variables[name];
+            const displayName = variable?.display_name ?? name;
+            const proposal = proposalsByColumn.get(name);
+            const evidence = proposal?.role?.evidence ?? proposal?.kind?.evidence;
+            const roleLabel = copy.roles[role.role as keyof typeof copy.roles] ?? role.role;
+            const kindLabel = copy.kinds[role.kind as keyof typeof copy.kinds] ?? role.kind;
+            return <article key={name} className="pending-review-item">
+              <div>
+                <h3>{displayName}</h3>
+                <p><strong>{copy.proposedClassification}:</strong> {roleLabel} · {kindLabel}</p>
+                {evidence ? <p className="form-help evidence-quote"><strong>{copy.evidence}:</strong> {evidence}</p> : null}
+                {conflictColumns.has(name) ? <p className="warning-line">{copy.resolveConflict}</p> : null}
+              </div>
+              {!conflictColumns.has(name) ? <button type="button" className="primary-action" aria-label={`${copy.confirmSuggestion} ${displayName}`} onClick={() => setRoles((current) => ({ ...current, [name]: { ...current[name], confirmed: true } }))}>{copy.confirmSuggestion} {displayName}</button> : null}
+            </article>;
+          })}
+        </div>
       </section> : null}
       {importFailure ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{importFailure === "picker" ? copy.pickerFailure : importFailure === "profile" ? copy.profileFailure : importFailure === "brief" ? copy.briefFailure : copy.matchingFailure}</p></div> : null}
       {approvalFailed ? <div className="error-panel" role="alert"><span aria-hidden="true">!</span><p>{copy.approvalFailure}</p></div> : null}

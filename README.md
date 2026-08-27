@@ -170,6 +170,7 @@ The current package is ad-hoc signed and not notarized because no Apple Develope
 - Packaged arm64 renderer/preload, bundled sidecar, strict ad-hoc signature, and DMG checksum gates: passed
 - Real `Methods_Section.docx` plus the 500×54 `PassiveSurveillance.xlsx`: correct primary outcome/exposure/covariate matching with local `qwen2.5:14b`, both from source and from the service bundled inside the DMG
 - Packaged-GUI acceptance with the real workbook: passed. Excel profiling remains visible while the user names the local `.biostat` project, then 500 observations, 54 variables, and the matched roles are shown for explicit human review.
+- After bulk acceptance, a high-visibility review panel immediately above final approval lists every remaining methodology match, its proposed role/kind, source evidence, and a direct confirmation action. Packaged-GUI acceptance with the real files showed all five pending matches in this panel.
 - Unapproved Excel profiles now survive navigation to the study brief and the independent power calculator. Editing the scientific brief intentionally clears the stale Excel draft so its variable matches must be prepared again.
 - The packaged desktop security boundary explicitly permits the local `/v1/power` calculation route.
 - English/Turkish DOCX numerical parity and visual render review: passed

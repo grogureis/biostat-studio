@@ -3,6 +3,29 @@
 **Son güncelleme:** 2026-08-27 · Codex App
 **Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio` (Plan 3 fast-forward birleştirildi)
 
+### Nihai onayın yanındaki bekleyen-değişken paneli — 2026-08-27
+
+Kullanıcının ikinci paket ekran görüntüsü önceki düzeltmenin teknik olarak çalıştığını,
+ancak hâlâ kullanılamaz olduğunu gösterdi: toplu kabul düğmesi kaybolmuştu; buna karşılık
+listenin yukarısındaki beş düşük güvenli metodoloji önerisi onaysız kaldığı için en alttaki
+`Approve data structure` sessizce pasifti. Kullanıcıya hangi değişkenlerin beklediği veya
+ne yapması gerektiği nihai eylemin yanında gösterilmiyordu.
+
+Toplu işlem bittikten sonra nihai onayın hemen üstünde yüksek görünürlüklü bir inceleme
+paneli açılıyor. Panel bekleyen sayıyı, her değişkenin adını, önerilen rol/türünü, doküman
+kanıtını ve doğrudan turuncu onay düğmesini gösteriyor; onaylanan satır panelden düşüyor.
+Bu davranış test-first RED→GREEN ile ölçüldü. Taze kapılar Python **350/350**,
+desktop **89/89**, typecheck, üretim derlemesi ve diff kontrolü temiz.
+
+Yeni DMG doğrudan salt okunur bağlanıp paketli GUI'de gerçek `Methods_Section.docx` ve
+500×54 `PassiveSurveillance.xlsx` ile çalıştırıldı. Toplu kabulden sonra panel tam beş
+bekleyen eşleşmeyi gösterdi: Yaş/Covariate/Continuous, Cinsiyet/Covariate/Binary,
+News2 ilk/Covariate/Continuous, Öğrenci bildirimi/Exposure/Binary ve Kötüleşme
+primer/Outcome/Binary. Bilimsel onay otomatik verilmedi. Kabul için oluşturulan ve gerçek
+Excel kopyasını içeren `/private/tmp/BioStat Acceptance 1529.biostat` sonrasında kalıcı
+olarak silindi. Teslim DMG: 198.467.831 bayt; SHA-256
+`58ec436970b49805c3d311ad9748c1f3355adb4732afaa05d1c8765e30cf4365`.
+
 ### Açık değişken onayı ve tüm ekranlarda Excel sürekliliği — 2026-08-27
 
 Gerçek 500×54 çalışma kitabında `Kalan uygun değişkenleri kabul et` işlemi

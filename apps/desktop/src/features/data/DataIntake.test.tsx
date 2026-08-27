@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -317,7 +317,11 @@ it("offers explicit human confirmation for a low-confidence local-AI suggestion"
   expect(screen.queryByRole("button", { name: "Accept remaining clear variables" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Approve data structure" })).toBeDisabled();
 
-  await user.click(screen.getByRole("button", { name: "Confirm suggestion for Outcome" }));
+  const pendingReview = screen.getByRole("region", { name: "Review before approval" });
+  expect(pendingReview).toHaveTextContent("1 variable still needs your confirmation");
+  expect(pendingReview).toHaveTextContent("Outcome");
+  expect(pendingReview).toHaveTextContent("Outcome · Continuous");
+  await user.click(within(pendingReview).getByRole("button", { name: "Confirm suggestion for Outcome" }));
   expect(screen.getByRole("button", { name: "Approve data structure" })).toBeEnabled();
   await user.click(screen.getByRole("button", { name: "Approve data structure" }));
 

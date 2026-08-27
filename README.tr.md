@@ -169,6 +169,7 @@ Apple Developer ID yapılandırılmadığı için mevcut paket ad-hoc imzalıdı
 - TypeScript tür denetimi ve üretim derlemesi: geçti
 - Paketli arm64 renderer/preload, gömülü yan hizmet, katı ad-hoc imza ve DMG sağlama toplamı kapıları: geçti
 - Gerçek `Methods_Section.docx` + 500×54 `PassiveSurveillance.xlsx`: kaynak ve DMG içindeki paketli serviste yerel `qwen2.5:14b` ile doğru birincil sonuç/maruziyet/kovaryat eşleştirmesi geçti
+- Toplu kabulden sonra nihai onayın hemen üstünde görünen inceleme paneli, bekleyen her metodoloji eşleşmesini önerilen rol/tür, kaynak kanıtı ve doğrudan onay düğmesiyle listeler. Gerçek dosyalarla paketli GUI kabulünde beş eşleşmenin tamamı bu panelde görüldü.
 - Onaylanmamış Excel profili çalışma özeti ve bağımsız güç ekranına gidip gelince korunur. Bilimsel çalışma özeti gerçekten düzenlenirse eski eşleştirmeler bilinçli olarak temizlenir ve yeniden hazırlanır.
 - Paketli masaüstü güvenlik sınırı yerel `/v1/power` hesaplama yoluna açıkça izin verir.
 - İngilizce/Türkçe DOCX sayısal eşdeğerliği ve görsel render incelemesi: geçti
