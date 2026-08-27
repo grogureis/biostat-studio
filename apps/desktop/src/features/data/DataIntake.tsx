@@ -1,6 +1,6 @@
 import { AnalysisApiError, type AnalysisApi } from "../../api/client";
 import type { ConflictDto, DataProfile, MethodologyExtraction, RoleProposalDto, StudyBrief, VariableProposalResponse, VariableRole } from "../../api/types";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { methodLabel } from "../plan/methodLabels";
 
 interface DataIntakeProps {
@@ -35,6 +35,8 @@ const labels = {
     profilingStatus: "Reading the Excel structure on this Mac…",
     projectStatus: "Excel is ready. Choose where to save the local BioStat project in the window that opens; then the local AI will match the methodology to the variables.",
     acceptRemaining: "Accept remaining clear variables",
+    reviewRequired: "This methodology suggestion requires your review before approval.",
+    confirmSuggestion: "Confirm suggestion for",
     conflict: "Conflict for",
     conflictTitle: "Document and data disagree",
     dataSays: "Data classification",
@@ -70,6 +72,8 @@ const labels = {
     profilingStatus: "Excel yapısı bu Mac üzerinde okunuyor…",
     projectStatus: "Excel hazır. Açılan pencerede yerel BioStat projesinin kaydedileceği yeri seçin; ardından yerel yapay zekâ metodolojiyi değişkenlerle eşleştirecek.",
     acceptRemaining: "Kalan uygun değişkenleri kabul et",
+    reviewRequired: "Bu metodoloji önerisi onaydan önce incelemenizi gerektiriyor.",
+    confirmSuggestion: "Öneriyi onayla",
     conflict: "Çelişki",
     conflictTitle: "Doküman ve veri uyuşmuyor",
     dataSays: "Veri sınıflandırması",
@@ -193,6 +197,19 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
   const [importStage, setImportStage] = useState<"profiling" | "project" | null>(null);
   const [importing, setImporting] = useState(false);
   const [preparationReady, setPreparationReady] = useState(false);
+
+  useEffect(() => {
+    if (dataFile !== null) return;
+    setImportFailure(null);
+    setProfile(null);
+    setRoles({});
+    setApprovalFailed(false);
+    setProposalData(EMPTY_PROPOSALS);
+    setImportStage(null);
+    setImporting(false);
+    setPreparationReady(false);
+  }, [dataFile]);
+
   const chooseFile = async () => {
     if (importing) return;
     setImporting(true);
@@ -204,12 +221,12 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
       setImporting(false);
       return;
     }
-    setImportFailure(null);
-    onFile(path);
     if (!path) {
       setImporting(false);
       return;
     }
+    setImportFailure(null);
+    onFile(path);
     setProfile(null);
     setRoles({});
     setProposalData(EMPTY_PROPOSALS);
@@ -269,6 +286,13 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
       setApproving(false);
     }
   };
+  const conflictColumns = new Set(proposalData.conflicts.map((conflict) => conflict.column));
+  const proposalsByColumn = new Map(proposalData.proposals.map((proposal) => [proposal.column, proposal]));
+  const hasBulkAcceptableRole = Object.entries(roles).some(([name, role]) => (
+    !role.confirmed
+    && !conflictColumns.has(name)
+    && proposalConfidence(proposalsByColumn.get(name)) >= LOW_CONFIDENCE
+  ));
 
   return (
     <section className="task-card" aria-labelledby="data-title" aria-busy={importing}>
@@ -290,7 +314,7 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
       {importStage ? <p className="import-status" role="status" aria-live="polite">{importStage === "profiling" ? copy.profilingStatus : copy.projectStatus}</p> : null}
       {profile ? <section className="variable-profile" aria-labelledby="variable-profile-title">
         <h2 id="variable-profile-title">{copy.variables}</h2>
-        {preparationReady && Object.values(roles).some((role) => !role.confirmed) ? <button type="button" className="secondary-action" onClick={acceptRemaining}>{copy.acceptRemaining}</button> : null}
+        {preparationReady && hasBulkAcceptableRole ? <button type="button" className="secondary-action" onClick={acceptRemaining}>{copy.acceptRemaining}</button> : null}
         {proposalData.conflicts.map((conflict) => <ConflictChoice
           key={conflict.column}
           conflict={conflict}
@@ -306,6 +330,10 @@ export function DataIntake({ api, dataFile, approved, language, brief, methodolo
             {evidence ? <p className="form-help evidence-quote"><strong>{copy.evidence}:</strong> {evidence}</p> : null}
             <label>{copy.role} {variable.display_name}<select disabled={!preparationReady} aria-label={`${copy.role} ${variable.display_name}`} value={roles[name]?.role ?? "none"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], role: event.target.value, confirmed: true } }))}>{Object.entries(copy.roles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label>{copy.kind} {variable.display_name}<select disabled={!preparationReady} aria-label={`${copy.kind} ${variable.display_name}`} value={roles[name]?.kind ?? "exclude"} onChange={(event) => setRoles((current) => ({ ...current, [name]: { ...current[name], kind: event.target.value, confirmed: true } }))}>{Object.entries(copy.kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            {proposal && !roles[name]?.confirmed && proposalConfidence(proposal) < LOW_CONFIDENCE && !conflictColumns.has(name) ? <div className="proposal-confirmation">
+              <p className="form-help">{copy.reviewRequired}</p>
+              <button type="button" className="secondary-action" aria-label={`${copy.confirmSuggestion} ${variable.display_name}`} onClick={() => setRoles((current) => ({ ...current, [name]: { ...current[name], confirmed: true } }))}>{copy.confirmSuggestion} {variable.display_name}</button>
+            </div> : null}
           </article>;
         })}
         {profile.warnings.length ? <div className="warning-line"><strong>{copy.warnings}</strong><ul>{profile.warnings.map((warning) => <li key={`${warning.code}:${warning.column ?? "all"}`}>{warning.message}</li>)}</ul></div> : null}

@@ -10,7 +10,7 @@ It is designed for biomedical researchers who want a guided workflow without sen
 
 ## What the application does
 
-BioStat Studio guides the researcher through six explicit stages:
+BioStat Studio guides the researcher through seven explicit stages:
 
 1. **Study brief** — record the research question, hypothesis, design, outcomes, exposures, covariates, and language. Local `qwen2.5:14b` proposes these fields from a Word, PDF, TXT, or Markdown methodology document with source evidence; every field remains editable and unconfirmed.
 2. **Data and variables** — import an `.xlsx` workbook, inspect its structural profile, reconcile methodology concepts with dataset columns, and explicitly confirm variable roles and analytical kinds. Conflicts are surfaced above the variable list with document evidence and their real effect on the analysis plan.
@@ -18,6 +18,7 @@ BioStat Studio guides the researcher through six explicit stages:
 4. **Run and diagnose** — execute only the approved immutable plan, monitor progress, and cancel safely when needed.
 5. **Results review** — inspect estimates, 95% confidence intervals, p values, effect sizes, warnings, and provenance.
 6. **Word report** — export an English or Turkish `.docx` Results section with narrative, tables, figures, and a reproducibility appendix.
+7. **Power and sample size** — calculate deterministic a-priori power or sample size independently of an imported project.
 
 The source workbook is never overwritten. Every completed job is bound to the exact project snapshot, confirmed variable-role snapshot, approved plan revision, and data fingerprint used for execution.
 
@@ -40,7 +41,7 @@ The current release executes:
 
 Rank-based methods are never selected silently: the plan documents them as alternatives, and switching to one regenerates the plan for a new explicit approval. A deterministic a-priori **power and sample-size calculator** (two-sample and paired t tests, one-way ANOVA, two proportions, correlation) is available without touching imported data. CSV/SAV import, survival analysis, mixed models, meta-analysis, causal-inference workflows, and machine learning remain roadmap items.
 
-Methodology matching uses local Ollama `qwen2.5:14b` as its primary engine and a deterministic rule extractor as its safe fallback. The model extracts the question, hypothesis, outcome, exposure, and covariates from the primary-analysis sentence, then matches those concepts to exact Excel column names. These classifications are not a calibrated prediction model. Until gold-set calibration is complete, LLM confidence is capped at `0.79`; the bulk-accept threshold is `0.80`, so the application never writes `confirmed=true` until the researcher reviews and explicitly accepts or edits each proposal.
+Methodology matching uses local Ollama `qwen2.5:14b` as its primary engine and a deterministic rule extractor as its safe fallback. The model extracts the question, hypothesis, outcome, exposure, and covariates from the primary-analysis sentence, then matches those concepts to exact Excel column names. These classifications are not a calibrated prediction model. Until gold-set calibration is complete, LLM confidence is capped at `0.79`; the bulk-accept threshold is `0.80`. The bulk action accepts only structurally clear variables and then disappears. Every lower-confidence methodology suggestion receives its own explicit review action, so the application never writes `confirmed=true` until the researcher accepts or edits it.
 
 ## Architecture
 
@@ -163,13 +164,14 @@ The current package is ad-hoc signed and not notarized because no Apple Develope
 
 ## Current validation
 
-- Python scientific/service suite: **349 passed, 1 environment-gated skip**
-- Desktop suite: **87 passed**
+- Python scientific/service suite: **350 passed**
+- Desktop suite: **89 passed**
 - TypeScript typecheck and production build: passed
 - Packaged arm64 renderer/preload, bundled sidecar, strict ad-hoc signature, and DMG checksum gates: passed
 - Real `Methods_Section.docx` plus the 500×54 `PassiveSurveillance.xlsx`: correct primary outcome/exposure/covariate matching with local `qwen2.5:14b`, both from source and from the service bundled inside the DMG
 - Packaged-GUI acceptance with the real workbook: passed. Excel profiling remains visible while the user names the local `.biostat` project, then 500 observations, 54 variables, and the matched roles are shown for explicit human review.
-- Unapproved Excel profiles now survive a visit to the independent power calculator, and the packaged desktop security boundary explicitly permits the local `/v1/power` calculation route.
+- Unapproved Excel profiles now survive navigation to the study brief and the independent power calculator. Editing the scientific brief intentionally clears the stale Excel draft so its variable matches must be prepared again.
+- The packaged desktop security boundary explicitly permits the local `/v1/power` calculation route.
 - English/Turkish DOCX numerical parity and visual render review: passed
 - English/Turkish DOCX accessibility audit: 0 high, 0 medium, 0 low findings
 

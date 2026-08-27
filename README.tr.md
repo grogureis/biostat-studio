@@ -10,7 +10,7 @@ Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmi�
 
 ## Uygulama ne yapar?
 
-BioStat Studio araştırmacıyı altı açık aşamadan geçirir:
+BioStat Studio araştırmacıyı yedi açık aşamadan geçirir:
 
 1. **Çalışma özeti** — araştırma sorusu, hipotez, tasarım, sonuçlar, maruziyetler, kovaryatlar ve dili kaydeder. Yerel `qwen2.5:14b`, Word, PDF, TXT veya Markdown metodoloji belgesinden bu alanları kanıtlarıyla önerir; her alan düzenlenebilir ve onaysız kalır.
 2. **Veri ve değişkenler** — `.xlsx` çalışma kitabını içe aktarır, yapısal profili inceler, metodoloji kavramlarını veri sütunlarıyla uzlaştırır ve değişken rolleriyle analitik türleri açıkça onaylatır. Çelişkiler, belge kanıtı ve analiz planına gerçek etkileriyle değişken listesinin üzerinde gösterilir.
@@ -18,6 +18,7 @@ BioStat Studio araştırmacıyı altı açık aşamadan geçirir:
 4. **Çalıştır ve tanıla** — yalnızca onaylanan değişmez planı yürütür, ilerlemeyi gösterir ve gerektiğinde güvenle iptal eder.
 5. **Sonuçları incele** — tahminleri, %95 güven aralıklarını, p değerlerini, etki büyüklüklerini, uyarıları ve analiz kökenini sunar.
 6. **Word raporu** — anlatı, tablolar, şekiller ve yeniden üretilebilirlik eki içeren İngilizce veya Türkçe `.docx` Bulgular bölümü oluşturur.
+7. **Güç ve örneklem** — içe aktarılmış bir projeden bağımsız olarak belirlenimci önsel güç veya örneklem büyüklüğü hesabı yapar.
 
 Kaynak Excel dosyasının üzerine hiçbir zaman yazılmaz. Her tamamlanmış iş; yürütmede kullanılan tam proje kopyasına, onaylanmış değişken-rolü kaydına, plan revizyonuna ve veri parmak izine bağlıdır.
 
@@ -40,7 +41,7 @@ Mevcut sürüm şu analizleri yürütür:
 
 Sıra temelli yöntemler asla sessizce seçilmez: plan bunları alternatif olarak belgeler ve birine geçiş, yeni bir açık onay için planı yeniden oluşturur. İçe aktarılmış veriye dokunmayan belirlenimci önsel **güç ve örneklem büyüklüğü hesaplayıcısı** (iki örneklem ve eşleştirilmiş t testleri, tek yönlü ANOVA, iki oran, korelasyon) kullanılabilir. CSV/SAV aktarımı, sağkalım analizi, karma modeller, meta-analiz, nedensel çıkarım ve makine öğrenmesi yol haritasındadır.
 
-Metodoloji eşleştirmesi yerel Ollama `qwen2.5:14b` modelini birincil, belirlenimci kural motorunu güvenli geri dönüş olarak kullanır. Model birincil analiz cümlesinden soru, hipotez, sonuç, maruziyet ve kovaryatları çıkarır; sonra bunları Excel'in gerçek sütun adlarıyla eşleştirir. Bu sınıflandırmalar kalibre edilmiş bir tahmin modeli değildir. Gold-set kalibrasyonu tamamlanana kadar LLM güveni en fazla `0.79`'dur; toplu kabul eşiği `0.80` olduğu için araştırmacı inceleyip açıkça kabul etmeden veya düzenlemeden uygulama `confirmed=true` yazmaz.
+Metodoloji eşleştirmesi yerel Ollama `qwen2.5:14b` modelini birincil, belirlenimci kural motorunu güvenli geri dönüş olarak kullanır. Model birincil analiz cümlesinden soru, hipotez, sonuç, maruziyet ve kovaryatları çıkarır; sonra bunları Excel'in gerçek sütun adlarıyla eşleştirir. Bu sınıflandırmalar kalibre edilmiş bir tahmin modeli değildir. Gold-set kalibrasyonu tamamlanana kadar LLM güveni en fazla `0.79`'dur; toplu kabul eşiği `0.80`'dir. Toplu düğme yalnızca yapısal olarak açık değişkenleri kabul eder ve işi bitince kaybolur. Daha düşük güvenli her metodoloji önerisi ayrı bir inceleme düğmesi alır; araştırmacı açıkça kabul etmeden veya düzenlemeden uygulama `confirmed=true` yazmaz.
 
 ## Mimari
 
@@ -163,15 +164,17 @@ Apple Developer ID yapılandırılmadığı için mevcut paket ad-hoc imzalıdı
 
 ## Mevcut doğrulama
 
-- Python bilimsel/servis paketi: **349 geçti, 1 ortam koşullu atlandı**
-- Masaüstü paketi: **82 geçti**
+- Python bilimsel/servis paketi: **350 geçti**
+- Masaüstü paketi: **89 geçti**
 - TypeScript tür denetimi ve üretim derlemesi: geçti
 - Paketli arm64 renderer/preload, gömülü yan hizmet, katı ad-hoc imza ve DMG sağlama toplamı kapıları: geçti
 - Gerçek `Methods_Section.docx` + 500×54 `PassiveSurveillance.xlsx`: kaynak ve DMG içindeki paketli serviste yerel `qwen2.5:14b` ile doğru birincil sonuç/maruziyet/kovaryat eşleştirmesi geçti
+- Onaylanmamış Excel profili çalışma özeti ve bağımsız güç ekranına gidip gelince korunur. Bilimsel çalışma özeti gerçekten düzenlenirse eski eşleştirmeler bilinçli olarak temizlenir ve yeniden hazırlanır.
+- Paketli masaüstü güvenlik sınırı yerel `/v1/power` hesaplama yoluna açıkça izin verir.
 - İngilizce/Türkçe DOCX sayısal eşdeğerliği ve görsel render incelemesi: geçti
 - İngilizce/Türkçe DOCX erişilebilirlik denetimi: 0 yüksek, 0 orta, 0 düşük bulgu
 
-Kalan kabul kapısı, paketli grafik arayüzde insanın önerileri görsel olarak inceleyip onaylaması ve iki dilde raporları operatör olarak değerlendirmesidir.
+Excel alımı ve ekranlar arası durum kapıları kapanmıştır. Kalan operatör kapısı, önerilen veri yapısını onaylamak, hedef analizi çalıştırmak ve iki dilde raporları bilimsel olarak incelemektir.
 
 ## Yol haritası
 

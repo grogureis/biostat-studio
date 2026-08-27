@@ -419,6 +419,38 @@ describe("Clinical Calm workflow", () => {
     expect(screen.getByRole("button", { name: "Accept remaining clear variables" })).toBeEnabled();
   });
 
+  it("keeps an unapproved Excel profile when the user views the study brief and returns", async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi()} />);
+
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+    await user.click(screen.getByRole("button", { name: "Import Excel" }));
+    expect(await screen.findByText("12 observations")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Study brief" }));
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+
+    expect(screen.getByText("12 observations")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Variable structure" })).toBeInTheDocument();
+  });
+
+  it("clears an unapproved Excel draft when the study brief actually changes", async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi()} />);
+
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+    await user.click(screen.getByRole("button", { name: "Import Excel" }));
+    expect(await screen.findByText("12 observations")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Study brief" }));
+    await user.type(screen.getByRole("textbox", { name: "Research question" }), "Updated question");
+    await user.click(screen.getByRole("button", { name: "Data & variables" }));
+
+    expect(screen.getByText("No workbook selected")).toBeInTheDocument();
+    expect(screen.queryByText("12 observations")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Variable structure" })).not.toBeInTheDocument();
+  });
+
   it("localizes the power planner and shows a safe failure message", async () => {
     const api = fakeApi({
       computePower: vi.fn().mockRejectedValue(new AnalysisApiError("invalid_alpha", "invalid")),

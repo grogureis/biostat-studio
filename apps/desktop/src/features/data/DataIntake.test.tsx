@@ -286,7 +286,7 @@ it("identifies an incomplete study brief instead of blaming the Excel picker", a
   expect(alert).not.toHaveTextContent(/seçici açılamadı/i);
 });
 
-it("shows local-AI variable evidence and keeps uncalibrated suggestions unconfirmed", async () => {
+it("offers explicit human confirmation for a low-confidence local-AI suggestion", async () => {
   const user = userEvent.setup();
   const onApproval = vi.fn();
   const localProposal = {
@@ -314,6 +314,13 @@ it("shows local-AI variable evidence and keeps uncalibrated suggestions unconfir
 
   expect(await screen.findByText("The primary outcome was clinical deterioration.")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Accept remaining clear variables" }));
+  expect(screen.queryByRole("button", { name: "Accept remaining clear variables" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Approve data structure" })).toBeDisabled();
-  expect(onApproval).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: "Confirm suggestion for Outcome" }));
+  expect(screen.getByRole("button", { name: "Approve data structure" })).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "Approve data structure" }));
+
+  const submitted = onApproval.mock.calls.at(-1)?.[0] ?? [];
+  expect(submitted.find((role: { name: string }) => role.name === "outcome")?.confirmed).toBe(true);
 });

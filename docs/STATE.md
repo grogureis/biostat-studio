@@ -3,6 +3,28 @@
 **Son güncelleme:** 2026-08-27 · Codex App
 **Aktif geliştirme:** `.worktrees/biostat-studio` · `codex/biostat-studio` (Plan 3 fast-forward birleştirildi)
 
+### Açık değişken onayı ve tüm ekranlarda Excel sürekliliği — 2026-08-27
+
+Gerçek 500×54 çalışma kitabında `Kalan uygun değişkenleri kabul et` işlemi
+yapısal olarak açık değişkenleri onaylıyor, fakat `0.79` güvenle gelen beş yerel-LLM
+önerisi bilinçli olarak onaysız kaldığı ve bunlara ayrı bir onay yolu gösterilmediği
+için düğme çalışmıyormuş gibi görünüyordu. Toplu düğme artık tamamladığı anda kaybolur;
+düşük güvenli her metodoloji önerisinin yanında görünür bir insan onayı bulunur.
+`Veri yapısını onayla`, ancak tüm öneriler bu biçimde incelendikten sonra etkinleşir.
+
+Excel taslağı artık yalnızca Power ekranında değil, tüm iş akışı gezinmelerinde bağlı
+ve gizli tutulur; çalışma özetine bakıp geri dönmek 500 gözlem/54 değişken profilini
+silmez. Bilimsel çalışma özeti gerçekten düzenlenirse önceki yerel proje geçersiz
+olduğundan dosya ve eşleştirme taslağı açıkça temizlenir; kullanıcı Excel'i yeniden
+içe aktararak yeni özete göre eşleştirme yapar. Bu ayrım üç yeni/yenilenmiş masaüstü
+regresyon testiyle korunuyor.
+
+Taze kapılar: Python **350/350**, desktop **89/89**, TypeScript typecheck, Vite
+üretim derlemesi ve `git diff --check` temiz. Yeni arm64 DMG; renderer/preload
+smoke, gömülü servis öz testi, katı ad-hoc imza ve `hdiutil verify` kapılarından
+geçti. Teslim: `release/BioStat Studio-0.1.0-arm64.dmg` (198.462.968 bayt),
+SHA-256 `893729d175eccebef922506f7e9fb4e7fc0503cb78ac3c648d1be47b857370b1`.
+
 ### Power geçidi ve ekranlar arası Excel durumu düzeltildi — 2026-08-27
 
 Paketli uygulamada kullanıcı akışıyla iki ayrı hata yeniden üretildi. Birincisi,

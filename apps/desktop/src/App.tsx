@@ -130,6 +130,10 @@ export function App({ api }: { api: AnalysisApi }) {
 
   const changeBrief = (next: typeof project.brief) => {
     invalidateTransientState();
+    // Merely visiting the brief must preserve the Excel draft. Once the
+    // scientific brief actually changes, however, its existing variable
+    // matches belong to an invalidated project and must be prepared again.
+    if (project.dataFile) project.setDataFile(null);
     project.setBrief(next);
   };
 
@@ -212,7 +216,7 @@ export function App({ api }: { api: AnalysisApi }) {
     <main id="workspace" tabIndex={-1}>
       {failedOperation ? <ErrorBanner language={project.language} operation={failedOperation} detail={safeErrorDetail} onRetry={retryFailedOperation} /> : null}
       {project.activeStep === "study" ? <StudyBrief value={project.brief} onChange={changeBrief} onMethodology={project.setMethodology} language={project.language} api={api} /> : null}
-      {project.activeStep === "data" || project.activeStep === "power" ? <div hidden={project.activeStep !== "data"}><DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} methodology={project.methodology} onFile={changeDataFile} onApproval={approveData} language={project.language} /></div> : null}
+      <div hidden={project.activeStep !== "data"}><DataIntake api={api} dataFile={project.dataFile} approved={project.dataApproved} brief={project.brief} methodology={project.methodology} onFile={changeDataFile} onApproval={approveData} language={project.language} /></div>
       {project.activeStep === "plan" ? <PlanReview language={project.language} plan={project.plan} loading={planning} approved={project.planApproved} onApproval={(next) => void changePlanApproval(next)} onRun={() => void runAnalysis()} onAlternative={selectAlternative} /> : null}
       {project.activeStep === "power" ? <PowerPlanner api={api} language={project.language} /> : null}
       {project.activeStep === "run" ? <section className="task-card run-card" aria-labelledby="run-title"><p className="eyebrow">{text.runEyebrow}</p><h1 id="run-title">{text.stages.run}</h1>{running ? <><p role="status" aria-live="polite">{jobProgress.message ?? text.running}</p><progress aria-label={text.progress} aria-valuenow={jobProgress.progress} value={jobProgress.progress} max={100}>{jobProgress.progress}%</progress><button type="button" className="secondary-action" onClick={() => void cancel()}>{text.cancel}</button></> : cancelled ? <p role="status">{text.cancelled}</p> : <p className="loading-note">{text.ready}</p>}</section> : null}
