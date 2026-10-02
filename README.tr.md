@@ -2,15 +2,31 @@
 
 [English](README.md) | [Türkçe](README.tr.md)
 
+<p align="center">
+  <img src="docs/assets/overview.tr.png" width="1000" alt="BioStat Studio: araştırmacı onayıyla yerel analiz ve iki dilde Word raporu.">
+</p>
+
 BioStat Studio; araştırma sorusunu, isteğe bağlı metodoloji belgesini, Excel veri kümesini ve insan tarafından açıkça onaylanmış çalışma bilgilerini yeniden üretilebilir bir istatistiksel analize ve yayına hazır Word Bulgular bölümüne dönüştüren, Apple Silicon macOS için çevrimdışı öncelikli bir uygulamadır.
 
 Hasta veya araştırma verisini bir bulut hizmetine göndermeden yönlendirilmiş bir iş akışı isteyen biyomedikal araştırmacılar için tasarlanmıştır. Uygulama Codex'ten bağımsız çalışır ve kurulumdan sonra ayrıca Python yüklenmesini gerektirmez. Metodoloji yapay zekâsı için Ollama ve yerel `qwen2.5:14b` modeli gerekir; model kapalıysa uygulama çökmez, daha sınırlı kural motoruna geri döner.
 
 > **Proje durumu:** doğrulanmış yayın öncesi dikey kesit. Otomatik bilimsel, güvenlik, masaüstü, paketleme ve iki dilli rapor kapıları geçmektedir. Klinik veya üretim kullanımından önce gerçek veriyle operatör kabul testi gereklidir.
 
+## Bir bakışta
+
+| Girdi | Araştırmacının incelemesi | Çıktı |
+| --- | --- | --- |
+| Araştırma sorusu, isteğe bağlı metodoloji belgesi ve `.xlsx` çalışma kitabı | Çalışma bilgileri ve değişken rollerinin onayı, ardından analiz planının onayı | Tahminler, tanılar ve düzenlenebilir EN/TR `.docx` Bulgular bölümü |
+
+**Keşfet:** [İş akışı](#uygulama-ne-yapar) · [İstatistik kapsamı](#doğrulanmış-istatistik-kapsamı) · [Word çıktısı](#word-çıktısı) · [Geliştirme](#geliştirme) · [Doğrulama](#mevcut-doğrulama)
+
 ## Uygulama ne yapar?
 
-BioStat Studio araştırmacıyı yedi açık aşamadan geçirir:
+<p align="center">
+  <img src="docs/assets/workflow.tr.png" width="1000" alt="Altı sıralı analiz adımı; veri yapısı ve analiz planı için ayrı onaylar. Güç ve örneklem hesabı bağımsızdır.">
+</p>
+
+BioStat Studio, altı sıralı analiz aşaması ve bağımsız bir güç/örneklem aracından oluşur:
 
 1. **Çalışma özeti** — araştırma sorusu, hipotez, tasarım, sonuçlar, maruziyetler, kovaryatlar ve dili kaydeder. Yerel `qwen2.5:14b`, Word, PDF, TXT veya Markdown metodoloji belgesinden bu alanları kanıtlarıyla önerir; her alan düzenlenebilir ve onaysız kalır.
 2. **Veri ve değişkenler** — `.xlsx` çalışma kitabını içe aktarır, yapısal profili inceler, metodoloji kavramlarını veri sütunlarıyla uzlaştırır ve değişken rolleriyle analitik türleri açıkça onaylatır. Çelişkiler, belge kanıtı ve analiz planına gerçek etkileriyle değişken listesinin üzerinde gösterilir.
@@ -18,7 +34,7 @@ BioStat Studio araştırmacıyı yedi açık aşamadan geçirir:
 4. **Çalıştır ve tanıla** — yalnızca onaylanan değişmez planı yürütür, ilerlemeyi gösterir ve gerektiğinde güvenle iptal eder.
 5. **Sonuçları incele** — tahminleri, %95 güven aralıklarını, p değerlerini, etki büyüklüklerini, uyarıları ve analiz kökenini sunar.
 6. **Word raporu** — anlatı, tablolar, şekiller ve yeniden üretilebilirlik eki içeren İngilizce veya Türkçe `.docx` Bulgular bölümü oluşturur.
-7. **Güç ve örneklem** — içe aktarılmış bir projeden bağımsız olarak belirlenimci önsel güç veya örneklem büyüklüğü hesabı yapar.
+**Bağımsız araç: güç ve örneklem** — içe aktarılmış bir projeden bağımsız olarak belirlenimci önsel güç veya örneklem büyüklüğü hesabı yapar.
 
 Kaynak Excel dosyasının üzerine hiçbir zaman yazılmaz. Her tamamlanmış iş; yürütmede kullanılan tam proje kopyasına, onaylanmış değişken-rolü kaydına, plan revizyonuna ve veri parmak izine bağlıdır.
 
@@ -93,6 +109,12 @@ BioStat Studio istatistiksel çalışmayı destekler; klinik karar vermez ve nit
 
 ## Word çıktısı
 
+<p align="center">
+  <img src="docs/assets/report.tr.png" width="1000" alt="Şematik Word raporu: istatistiksel anlatı, tablolar, şekiller ve yeniden üretilebilirlik eki. İki dil aynı sayısal sonuçları kullanır.">
+</p>
+
+*Görseller şematiktir; uygulama ekran görüntüsü veya gerçek çalışma sonucu değildir. Ayrıntılı kapsam aşağıda açıklanmıştır.*
+
 Rapor üreticisi aşağıdakileri içeren düzenlenebilir bir `.docx` oluşturur:
 
 - makaleye hazır `Results` / `Bulgular` bölümü;
@@ -114,8 +136,13 @@ tests/fixtures/               Sentetik referans çalışma kitabı
 docs/superpowers/specs/       Onaylanmış ürün ve mimari tanımı
 docs/superpowers/plans/       Uygulama ve iyileştirme planları
 docs/architecture/            Etkileşimli mimari haritası (index.html)
-docs/assets/                  README'lerde kullanılan mimari şemaları
+docs/assets/                  İki dilli README görselleri ve mimari şemaları
+docs/remotion/                Görsel ve animasyon kaynakları (bağımsız proje)
 ```
+
+## Dokümantasyon görselleri
+
+README görselleri Remotion ile üretilir. Kaynak kodu, görsel üretim komutu ve iki dilde 18 saniyelik iş akışı animasyonu [`docs/remotion`](docs/remotion/README.md) dizinindedir. Bu bağımsız dokümantasyon projesi masaüstü uygulamasının bağımlılıklarını değiştirmez.
 
 ## Geliştirme
 

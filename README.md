@@ -2,15 +2,31 @@
 
 [English](README.md) | [Türkçe](README.tr.md)
 
+<p align="center">
+  <img src="docs/assets/overview.png" width="1000" alt="BioStat Studio: local analysis with researcher approval and bilingual Word reports.">
+</p>
+
 BioStat Studio is an offline-first Apple Silicon macOS application that turns a research question, an optional methodology document, an Excel dataset, and explicitly human-confirmed study metadata into a reproducible statistical analysis and a publication-ready Word Results section.
 
 It is designed for biomedical researchers who want a guided workflow without sending patient or research data to a cloud service. The application runs independently of Codex and does not require Python after installation. Methodology AI requires Ollama and the local `qwen2.5:14b` model; when the model is unavailable, the application stays usable and falls back to its narrower rule engine.
 
 > **Project status:** verified pre-release vertical slice. The automated scientific, security, desktop, packaging, and bilingual report gates pass. A real-dataset operator acceptance run is still required before any clinical or production use.
 
+## At a glance
+
+| Input | Researcher review | Output |
+| --- | --- | --- |
+| Research question, optional methodology document and `.xlsx` workbook | Confirm study metadata and variable roles, then approve the analysis plan | Estimates, diagnostics and an editable EN/TR `.docx` Results section |
+
+**Explore:** [Workflow](#what-the-application-does) · [Statistical scope](#verified-statistical-scope) · [Word output](#word-output) · [Development](#development) · [Validation](#current-validation)
+
 ## What the application does
 
-BioStat Studio guides the researcher through seven explicit stages:
+<p align="center">
+  <img src="docs/assets/workflow.png" width="1000" alt="Six sequential analysis stages, with separate data-structure and analysis-plan approvals; power and sample size are independent.">
+</p>
+
+BioStat Studio has six sequential analysis stages and an independent power/sample-size tool:
 
 1. **Study brief** — record the research question, hypothesis, design, outcomes, exposures, covariates, and language. Local `qwen2.5:14b` proposes these fields from a Word, PDF, TXT, or Markdown methodology document with source evidence; every field remains editable and unconfirmed.
 2. **Data and variables** — import an `.xlsx` workbook, inspect its structural profile, reconcile methodology concepts with dataset columns, and explicitly confirm variable roles and analytical kinds. Conflicts are surfaced above the variable list with document evidence and their real effect on the analysis plan.
@@ -18,7 +34,7 @@ BioStat Studio guides the researcher through seven explicit stages:
 4. **Run and diagnose** — execute only the approved immutable plan, monitor progress, and cancel safely when needed.
 5. **Results review** — inspect estimates, 95% confidence intervals, p values, effect sizes, warnings, and provenance.
 6. **Word report** — export an English or Turkish `.docx` Results section with narrative, tables, figures, and a reproducibility appendix.
-7. **Power and sample size** — calculate deterministic a-priori power or sample size independently of an imported project.
+**Independent tool: power and sample size** — calculate deterministic a-priori power or sample size independently of an imported project.
 
 The source workbook is never overwritten. Every completed job is bound to the exact project snapshot, confirmed variable-role snapshot, approved plan revision, and data fingerprint used for execution.
 
@@ -93,6 +109,12 @@ BioStat Studio supports statistical work; it does not make clinical decisions an
 
 ## Word output
 
+<p align="center">
+  <img src="docs/assets/report.png" width="1000" alt="Schematic Word report showing statistical narrative, tables, figures and reproducibility; English and Turkish use the same numerical result bundle.">
+</p>
+
+*Schematic illustrations, not application screenshots or real study results. The detailed specifications below remain authoritative.*
+
 The report generator creates an editable `.docx` containing:
 
 - a manuscript-ready `Results` / `Bulgular` section;
@@ -114,8 +136,13 @@ tests/fixtures/               Synthetic reference workbook
 docs/superpowers/specs/       Approved product and architecture specification
 docs/superpowers/plans/       Implementation and remediation plans
 docs/architecture/            Interactive architecture map (open index.html)
-docs/assets/                  Architecture diagrams used by the READMEs
+docs/assets/                  Bilingual README illustrations and architecture diagrams
+docs/remotion/                Reproducible stills and animated workflow (independent project)
 ```
+
+## Documentation visuals
+
+The README illustrations are generated with Remotion. Their source, asset-generation command and an 18-second animated workflow in both languages are in [`docs/remotion`](docs/remotion/README.md). This independent documentation project does not change the desktop application dependencies.
 
 ## Development
 
